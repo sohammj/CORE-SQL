@@ -62,5 +62,6 @@
         "iterator": "cpp",
         "memory_resource": "cpp",
         "utility": "cpp"
-    }
+    },
+    "C_Cpp.errorSquiggles": "disabled"
 }

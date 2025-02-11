@@ -2,6 +2,7 @@
 #define STORAGE_H
 
 #include "Table.h"
+#include <string>
 
 class Storage {
 public:
