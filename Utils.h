@@ -3,6 +3,9 @@
 
 #include <string>
 #include <algorithm>
+#include <cctype>
+#include <iterator>
+#include <functional>
 
 inline std::string toUpperCase(const std::string& str) {
     std::string upperStr = str;
