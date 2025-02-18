@@ -40,6 +40,9 @@ public:
     void rollbackTransaction();
 private:
     std::unordered_map<std::string, Table> tables;
+    // For basic transaction simulation.
+    bool inTransaction = false;
+    std::unordered_map<std::string, Table> backupTables;
 };
 
 #endif // DATABASE_H

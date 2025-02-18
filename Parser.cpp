@@ -29,9 +29,8 @@ Query Parser::parseQuery(const std::string& queryStr) {
             std::istringstream issFrom(queryStr.substr(fromPos + 4));
             issFrom >> q.tableName;
         }
-        // Extract WHERE, GROUP BY, ORDER BY, HAVING if present.
         q.condition = extractCondition(queryStr);
-        // Simple extraction for ORDER BY
+        // ORDER BY extraction
         size_t orderPos = toUpperCase(queryStr).find("ORDER BY");
         if (orderPos != std::string::npos) {
             size_t endPos = queryStr.find_first_of("\n;", orderPos);
@@ -91,19 +90,22 @@ Query Parser::parseQuery(const std::string& queryStr) {
         iss >> word; // Expect action: ADD or DROP
         q.alterAction = toUpperCase(word);
         if (q.alterAction == "ADD") {
-            // Expect column definition in parentheses.
             q.columns = extractColumns(queryStr);
             if (!q.columns.empty())
                 q.alterColumn = q.columns[0];
         } else if (q.alterAction == "DROP") {
-            iss >> q.alterColumn.first; // column name to drop
+            // Optional "COLUMN" keyword may be present.
+            iss >> word;
+            if (toUpperCase(word) == "COLUMN")
+                iss >> q.alterColumn.first;
+            else
+                q.alterColumn.first = word;
         }
     } else if (command == "DESCRIBE") {
         q.type = "DESCRIBE";
         iss >> q.tableName;
     } else if (command == "SHOW") {
         q.type = "SHOW";
-        // Expect "TABLES"
     } else if (command == "BEGIN") {
         q.type = "BEGIN";
     } else if (command == "COMMIT") {
@@ -126,7 +128,11 @@ std::vector<std::vector<std::string>> Parser::extractValues(const std::string& q
         std::string value;
         std::vector<std::string> valueSet;
         while (std::getline(iss, value, ',')) {
-            valueSet.push_back(trim(value));
+            value = trim(value);
+            // Remove surrounding single quotes, if present.
+            if (!value.empty() && value.front() == '\'' && value.back() == '\'' && value.size() > 1)
+                value = value.substr(1, value.size() - 2);
+            valueSet.push_back(value);
         }
         values.push_back(valueSet);
         start = end + 1;
@@ -167,6 +173,9 @@ std::vector<std::pair<std::string, std::string>> Parser::extractUpdates(const st
         if (eq == std::string::npos) continue;
         std::string col = trim(update.substr(0, eq));
         std::string val = trim(update.substr(eq + 1));
+        // Remove surrounding single quotes from update value.
+        if (!val.empty() && val.front() == '\'' && val.back() == '\'' && val.size() > 1)
+            val = val.substr(1, val.size() - 2);
         updates.emplace_back(col, val);
     }
     return updates;

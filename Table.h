@@ -8,11 +8,11 @@ class Table {
 public:
     // DDL: Create schema
     void addColumn(const std::string& columnName, const std::string& type);
-    void dropColumn(const std::string& columnName);
+    // Modified dropColumn returns bool.
+    bool dropColumn(const std::string& columnName);
 
     // DML: Row operations
     void addRow(const std::vector<std::string>& values);
-    // Extended select with filtering, ordering, grouping, and aggregation.
     void selectRows(const std::vector<std::string>& selectColumns,
                     const std::string& condition,
                     const std::vector<std::string>& orderByColumns = {},
@@ -24,8 +24,9 @@ public:
     void updateRows(const std::vector<std::pair<std::string, std::string>>& updates,
                     const std::string& condition);
 
-    // Accessor for column list (used in JOINs)
+    // Accessors for columns and rows (used in JOINs)
     const std::vector<std::string>& getColumns() const { return columns; }
+    const std::vector<std::vector<std::string>>& getRows() const { return rows; }
 private:
     std::vector<std::string> columns;
     std::vector<std::string> columnTypes;

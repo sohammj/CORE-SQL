@@ -38,8 +38,11 @@ void Database::alterTableDropColumn(const std::string& tableName, const std::str
         std::cout << "Table " << tableName << " does not exist." << std::endl;
         return;
     }
-    tables[lowerName].dropColumn(columnName);
-    std::cout << "Column " << columnName << " dropped from " << tableName << "." << std::endl;
+    bool success = tables[lowerName].dropColumn(columnName);
+    if (success)
+        std::cout << "Column " << columnName << " dropped from " << tableName << "." << std::endl;
+    else
+        std::cout << "Column " << columnName << " does not exist in " << tableName << "." << std::endl;
 }
 
 void Database::describeTable(const std::string& tableName) {
@@ -49,8 +52,6 @@ void Database::describeTable(const std::string& tableName) {
         return;
     }
     std::cout << "Schema for " << tableName << ":" << std::endl;
-    // For simplicity, we print the header from the Table.
-    // (A real implementation would also show column types.)
     const auto& cols = tables[lowerName].getColumns();
     for (const auto& col : cols)
         std::cout << col << "\t";
@@ -70,7 +71,6 @@ void Database::insertRecord(const std::string& tableName,
     std::cout << "Record(s) inserted into " << tableName << "." << std::endl;
 }
 
-// A very simple join: only supports inner join on equality between one column from each table.
 void Database::selectRecords(const std::string& tableName,
                              const std::vector<std::string>& selectColumns,
                              const std::string& condition,
@@ -88,7 +88,7 @@ void Database::selectRecords(const std::string& tableName,
         }
         tables[lowerName].selectRows(selectColumns, condition, orderByColumns, groupByColumns, havingCondition);
     } else {
-        // JOIN implementation
+        // JOIN implementation (nested-loop inner join)
         std::string leftName = toLowerCase(tableName);
         std::string rightName = toLowerCase(joinTable);
         if (tables.find(leftName) == tables.end() || tables.find(rightName) == tables.end()) {
@@ -103,7 +103,7 @@ void Database::selectRecords(const std::string& tableName,
         }
         std::string leftJoin = trim(joinCondition.substr(0, eqPos));
         std::string rightJoin = trim(joinCondition.substr(eqPos + 1));
-        // Extract column names (optionally strip table qualifiers)
+        // Remove table qualifiers if present.
         size_t dotPos = leftJoin.find('.');
         if (dotPos != std::string::npos)
             leftJoin = leftJoin.substr(dotPos + 1);
@@ -116,7 +116,6 @@ void Database::selectRecords(const std::string& tableName,
         Table& rightTable = tables[rightName];
         const auto& leftCols = leftTable.getColumns();
         const auto& rightCols = rightTable.getColumns();
-        // Find indices.
         auto lit = std::find(leftCols.begin(), leftCols.end(), leftJoin);
         auto rit = std::find(rightCols.begin(), rightCols.end(), rightJoin);
         if (lit == leftCols.end() || rit == rightCols.end()) {
@@ -126,22 +125,47 @@ void Database::selectRecords(const std::string& tableName,
         int leftIdx = std::distance(leftCols.begin(), lit);
         int rightIdx = std::distance(rightCols.begin(), rit);
         
-        // Perform join: for each row in leftTable, match rows in rightTable.
+        // Perform join.
         std::vector<std::vector<std::string>> joinResult;
-        // Prepare combined header.
+        // Combined header is concatenation of left and right headers.
         std::vector<std::string> combinedHeader = leftCols;
         for (const auto& col : rightCols)
             combinedHeader.push_back(col);
         
-        // For simplicity, we ignore join-level filtering aside from the equality.
-        // (You can extend this by integrating the ConditionParser for combined rows.)
-        // (Also, here we do a nested loop join.)
-        // Assuming we had a way to get all rows from a table (we would need to add an accessor).
-        // For demonstration, we assume that Table::printTable() prints all rows;
-        // here we simulate the join by reusing the internal data (not ideal in production code).
-        // ---
-        // In our toy example, we will simply print a message.
-        std::cout << "JOIN functionality not fully implemented. (This is a stub.)" << std::endl;
+        const auto& leftRows = leftTable.getRows();
+        const auto& rightRows = rightTable.getRows();
+        for (const auto& lrow : leftRows) {
+            for (const auto& rrow : rightRows) {
+                if (lrow[leftIdx] == rrow[rightIdx]) {
+                    std::vector<std::string> combinedRow = lrow;
+                    combinedRow.insert(combinedRow.end(), rrow.begin(), rrow.end());
+                    joinResult.push_back(combinedRow);
+                }
+            }
+        }
+        
+        // Determine which columns to display.
+        std::vector<std::string> displayColumns;
+        if (selectColumns.size() == 1 && selectColumns[0] == "*")
+            displayColumns = combinedHeader;
+        else
+            displayColumns = selectColumns;
+        
+        // Print header.
+        for (const auto& col : displayColumns)
+            std::cout << col << "\t";
+        std::cout << std::endl;
+        // Print joined rows.
+        for (const auto& row : joinResult) {
+            for (const auto& col : displayColumns) {
+                auto it = std::find(combinedHeader.begin(), combinedHeader.end(), col);
+                if (it != combinedHeader.end()) {
+                    int idx = std::distance(combinedHeader.begin(), it);
+                    std::cout << row[idx] << "\t";
+                }
+            }
+            std::cout << std::endl;
+        }
     }
 }
 
@@ -173,13 +197,28 @@ void Database::showTables() {
         std::cout << pair.first << std::endl;
 }
 
-// Transaction commands (simulated)
+// Transaction functions with basic backup/rollback.
 void Database::beginTransaction() {
+    if (!inTransaction) {
+        backupTables = tables; // Save backup copy.
+        inTransaction = true;
+    }
     std::cout << "Transaction started." << std::endl;
 }
+
 void Database::commitTransaction() {
+    if (inTransaction) {
+        inTransaction = false;
+        backupTables.clear();
+    }
     std::cout << "Transaction committed." << std::endl;
 }
+
 void Database::rollbackTransaction() {
+    if (inTransaction) {
+        tables = backupTables; // Restore backup.
+        backupTables.clear();
+        inTransaction = false;
+    }
     std::cout << "Transaction rolled back." << std::endl;
 }

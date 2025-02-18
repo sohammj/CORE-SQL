@@ -10,17 +10,17 @@
 void Table::addColumn(const std::string& columnName, const std::string& type) {
     columns.push_back(columnName);
     columnTypes.push_back(type);
-    // When adding a new column, append an empty value to each existing row.
+    // Append an empty value to each existing row.
     for (auto& row : rows) {
         row.push_back("");
     }
 }
 
-void Table::dropColumn(const std::string& columnName) {
+bool Table::dropColumn(const std::string& columnName) {
     auto it = std::find(columns.begin(), columns.end(), columnName);
     if (it == columns.end()) {
         std::cout << "Column " << columnName << " does not exist." << std::endl;
-        return;
+        return false;
     }
     int index = std::distance(columns.begin(), it);
     columns.erase(it);
@@ -29,11 +29,15 @@ void Table::dropColumn(const std::string& columnName) {
         if (index < row.size())
             row.erase(row.begin() + index);
     }
+    return true;
 }
 
 void Table::addRow(const std::vector<std::string>& values) {
-    // (A real implementation would validate against column types.)
-    rows.push_back(values);
+    // Pad with empty strings if values.size() is less than number of columns.
+    std::vector<std::string> newRow = values;
+    while (newRow.size() < columns.size())
+        newRow.push_back("");
+    rows.push_back(newRow);
 }
 
 void Table::printTable() {
@@ -86,6 +90,13 @@ void Table::selectRows(const std::vector<std::string>& selectColumns,
                        const std::vector<std::string>& orderByColumns,
                        const std::vector<std::string>& groupByColumns,
                        const std::string& havingCondition) {
+    // Determine which columns to display.
+    std::vector<std::string> displayColumns;
+    if (selectColumns.size() == 1 && selectColumns[0] == "*")
+        displayColumns = columns;
+    else
+        displayColumns = selectColumns;
+
     // Step 1: Filter rows based on WHERE clause.
     std::vector<std::vector<std::string>> filteredRows;
     if (!condition.empty()) {
@@ -99,8 +110,8 @@ void Table::selectRows(const std::vector<std::string>& selectColumns,
         filteredRows = rows;
     }
 
-    // Special aggregate: COUNT(*)
-    if (selectColumns.size() == 1 && toUpperCase(trim(selectColumns[0])) == "COUNT(*)") {
+    // Special aggregate: COUNT(*) if that is the only column selected.
+    if (displayColumns.size() == 1 && toUpperCase(trim(displayColumns[0])) == "COUNT(*)") {
         std::cout << "Count: " << filteredRows.size() << std::endl;
         return;
     }
@@ -119,38 +130,30 @@ void Table::selectRows(const std::vector<std::string>& selectColumns,
             }
             groups[key].push_back(row);
         }
-        // (HAVING clause filtering is not fully implemented; placeholder here.)
+        // Print header.
+        for (const auto& col : displayColumns)
+            std::cout << col << "\t";
+        std::cout << std::endl;
+        // For each group, compute aggregate row.
         for (const auto& kv : groups) {
-            std::cout << "Group: " << kv.first << std::endl;
-            auto groupRows = kv.second;
-            // Order within each group if ORDER BY is specified.
-            if (!orderByColumns.empty()) {
-                std::sort(groupRows.begin(), groupRows.end(), [&](const auto& a, const auto& b) {
-                    for (const auto& colName : orderByColumns) {
-                        auto it = std::find(columns.begin(), columns.end(), colName);
-                        if (it != columns.end()) {
-                            int idx = std::distance(columns.begin(), it);
-                            if (a[idx] < b[idx]) return true;
-                            else if (a[idx] > b[idx]) return false;
-                        }
-                    }
-                    return false;
-                });
-            }
-            // Print header and group rows.
-            for (const auto& col : selectColumns)
-                std::cout << col << "\t";
-            std::cout << std::endl;
-            for (const auto& row : groupRows) {
-                for (const auto& col : selectColumns) {
+            const auto& groupRows = kv.second;
+            std::vector<std::string> resultRow;
+            for (const auto& col : displayColumns) {
+                if (toUpperCase(col) == "COUNT(*)") {
+                    resultRow.push_back(std::to_string(groupRows.size()));
+                } else {
                     auto it = std::find(columns.begin(), columns.end(), col);
                     if (it != columns.end()) {
                         int idx = std::distance(columns.begin(), it);
-                        std::cout << row[idx] << "\t";
+                        resultRow.push_back(groupRows[0][idx]);
+                    } else {
+                        resultRow.push_back("");
                     }
                 }
-                std::cout << std::endl;
             }
+            for (const auto& cell : resultRow)
+                std::cout << cell << "\t";
+            std::cout << std::endl;
         }
         return;
     }
@@ -170,12 +173,13 @@ void Table::selectRows(const std::vector<std::string>& selectColumns,
         });
     }
 
-    // Step 4: Print the result.
-    for (const auto& col : selectColumns)
+    // Step 4: Print header.
+    for (const auto& col : displayColumns)
         std::cout << col << "\t";
     std::cout << std::endl;
+    // Print rows.
     for (const auto& row : filteredRows) {
-        for (const auto& col : selectColumns) {
+        for (const auto& col : displayColumns) {
             auto it = std::find(columns.begin(), columns.end(), col);
             if (it != columns.end()) {
                 int idx = std::distance(columns.begin(), it);
