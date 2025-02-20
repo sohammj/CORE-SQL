@@ -11,8 +11,7 @@ int main() {
     std::string commandBuffer;
     std::string line;
 
-    std::cout << "MY SQL Command Line Interface (Extended Version)" << std::endl;
-    std::cout << "Type your SQL commands. End each command with a semicolon (;) and press Enter." << std::endl;
+    std::cout << "MY SQL Command Line Interface" << std::endl;
 
     while (true) {
         // Primary prompt if starting a new command; continuation prompt otherwise.

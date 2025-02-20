@@ -57,16 +57,24 @@ Query Parser::parseQuery(const std::string& queryStr) {
         if (havingPos != std::string::npos) {
             q.havingCondition = trim(queryStr.substr(havingPos + 6));
         }
-        // JOIN extraction (very basic)
+        // JOIN extraction (adjusted)
         size_t joinPos = toUpperCase(queryStr).find("JOIN");
         if (joinPos != std::string::npos) {
             q.isJoin = true;
+            // Extract join table name.
             std::istringstream issJoin(queryStr.substr(joinPos + 4));
             issJoin >> q.joinTable;
-            // Look for ON
+            // Look for ON in the remainder of the query.
             size_t onPos = toUpperCase(queryStr).find("ON", joinPos);
             if (onPos != std::string::npos) {
-                q.joinCondition = trim(queryStr.substr(onPos + 2));
+                std::string joinCond = queryStr.substr(onPos + 2);
+                // Optionally, remove any trailing semicolon.
+                joinCond = trim(joinCond);
+                if (!joinCond.empty() && joinCond.back() == ';') {
+                    joinCond.pop_back();
+                    joinCond = trim(joinCond);
+                }
+                q.joinCondition = joinCond;
             }
         }
     } else if (command == "DELETE") {
@@ -90,9 +98,21 @@ Query Parser::parseQuery(const std::string& queryStr) {
         iss >> word; // Expect action: ADD or DROP
         q.alterAction = toUpperCase(word);
         if (q.alterAction == "ADD") {
-            q.columns = extractColumns(queryStr);
-            if (!q.columns.empty())
-                q.alterColumn = q.columns[0];
+            std::string nextToken;
+            if (iss >> nextToken) {
+                // Check if the next token is "COLUMN"
+                if (toUpperCase(nextToken) == "COLUMN") {
+                    std::string colName, colType;
+                    iss >> colName >> colType;
+                    q.alterColumn = { colName, colType };
+                } else {
+                    // Otherwise assume it's the column name followed by its type.
+                    std::string colName = nextToken;
+                    std::string colType;
+                    iss >> colType;
+                    q.alterColumn = { colName, colType };
+                }
+            }
         } else if (q.alterAction == "DROP") {
             // Optional "COLUMN" keyword may be present.
             iss >> word;
