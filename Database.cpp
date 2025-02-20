@@ -151,14 +151,25 @@ void Database::selectRecords(const std::string& tableName,
         else
             displayColumns = selectColumns;
         
-        // Print header.
+        // Process display columns to remove any table qualifiers.
+        std::vector<std::string> processedDisplayColumns;
+        for (const auto& col : displayColumns) {
+            std::string processed = col;
+            size_t dotPos = processed.find('.');
+            if (dotPos != std::string::npos)
+                processed = processed.substr(dotPos + 1);
+            processedDisplayColumns.push_back(processed);
+        }
+        
+        // Print header (using original display column names).
         for (const auto& col : displayColumns)
             std::cout << col << "\t";
         std::cout << std::endl;
-        // Print joined rows.
+        
+        // Print joined rows using processed display columns for matching.
         for (const auto& row : joinResult) {
-            for (const auto& col : displayColumns) {
-                auto it = std::find(combinedHeader.begin(), combinedHeader.end(), col);
+            for (const auto& procCol : processedDisplayColumns) {
+                auto it = std::find(combinedHeader.begin(), combinedHeader.end(), procCol);
                 if (it != combinedHeader.end()) {
                     int idx = std::distance(combinedHeader.begin(), it);
                     std::cout << row[idx] << "\t";
