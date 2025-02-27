@@ -26,7 +26,7 @@ private:
     void tokenize(const std::string& condition);
     std::string peek() const;
     std::string getNext();
-    bool match(const std::string& token);
+    bool matchCondition(const std::string& token);
     // Recursive descent parsing functions
     ConditionExprPtr parseExpression();
     ConditionExprPtr parseTerm();

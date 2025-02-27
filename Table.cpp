@@ -1,18 +1,19 @@
 #include "Table.h"
 #include "Utils.h"
 #include "ConditionParser.h"
+#include "Aggregation.h"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
 #include <unordered_map>
 #include <stdexcept>
 
-void Table::addColumn(const std::string& columnName, const std::string& type) {
+void Table::addColumn(const std::string& columnName, const std::string& type, bool isNotNull) {
     columns.push_back(columnName);
     columnTypes.push_back(type);
-    // Append an empty value to each existing row.
+    notNullConstraints.push_back(isNotNull);
     for (auto& row : rows) {
-        row.push_back("");
+        row.push_back(isNotNull ? "" : "");
     }
 }
 
@@ -25,6 +26,7 @@ bool Table::dropColumn(const std::string& columnName) {
     int index = std::distance(columns.begin(), it);
     columns.erase(it);
     columnTypes.erase(columnTypes.begin() + index);
+    notNullConstraints.erase(notNullConstraints.begin() + index);
     for (auto& row : rows) {
         if (index < row.size())
             row.erase(row.begin() + index);
@@ -33,11 +35,17 @@ bool Table::dropColumn(const std::string& columnName) {
 }
 
 void Table::addRow(const std::vector<std::string>& values) {
-    // Pad with empty strings if values.size() is less than number of columns.
-    std::vector<std::string> newRow = values;
-    while (newRow.size() < columns.size())
-        newRow.push_back("");
-    rows.push_back(newRow);
+    if (values.size() != columns.size()) {
+        std::cerr << "Error: Incorrect number of values for row." << std::endl;
+        return;
+    }
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (notNullConstraints[i] && values[i].empty()) {
+            std::cerr << "Error: NOT NULL constraint violated for column " << columns[i] << "." << std::endl;
+            return;
+        }
+    }
+    rows.push_back(values);
 }
 
 void Table::printTable() {
@@ -85,19 +93,30 @@ void Table::updateRows(const std::vector<std::pair<std::string, std::string>>& u
     }
 }
 
+void Table::clearRows() {
+    rows.clear();
+}
+
+static bool parseAggregate(const std::string& colExpr, std::string& func, std::string& colName) {
+    size_t pos1 = colExpr.find('(');
+    size_t pos2 = colExpr.find(')');
+    if (pos1 == std::string::npos || pos2 == std::string::npos) return false;
+    func = toUpperCase(trim(colExpr.substr(0, pos1)));
+    colName = trim(colExpr.substr(pos1 + 1, pos2 - pos1 - 1));
+    return true;
+}
+
 void Table::selectRows(const std::vector<std::string>& selectColumns,
                        const std::string& condition,
                        const std::vector<std::string>& orderByColumns,
                        const std::vector<std::string>& groupByColumns,
                        const std::string& havingCondition) {
-    // Determine which columns to display.
     std::vector<std::string> displayColumns;
     if (selectColumns.size() == 1 && selectColumns[0] == "*")
         displayColumns = columns;
     else
         displayColumns = selectColumns;
 
-    // Step 1: Filter rows based on WHERE clause.
     std::vector<std::vector<std::string>> filteredRows;
     if (!condition.empty()) {
         ConditionParser cp(condition);
@@ -110,13 +129,52 @@ void Table::selectRows(const std::vector<std::string>& selectColumns,
         filteredRows = rows;
     }
 
-    // Special aggregate: COUNT(*) if that is the only column selected.
-    if (displayColumns.size() == 1 && toUpperCase(trim(displayColumns[0])) == "COUNT(*)") {
-        std::cout << "Count: " << filteredRows.size() << std::endl;
+    // Check for aggregate functions (AVG, MIN, MAX, SUM, COUNT)
+    bool hasAggregate = false;
+    std::vector<std::string> aggregateResults;
+    for (const auto& colExpr : displayColumns) {
+        std::string func, colName;
+        if (parseAggregate(colExpr, func, colName)) {
+            hasAggregate = true;
+            auto it = std::find(columns.begin(), columns.end(), colName);
+            if (it == columns.end()) {
+                aggregateResults.push_back("");
+                continue;
+            }
+            int idx = std::distance(columns.begin(), it);
+            std::vector<std::string> colValues;
+            for (const auto& row : filteredRows) {
+                if (idx < row.size())
+                    colValues.push_back(row[idx]);
+            }
+            if (func == "COUNT" && colExpr.find("*") != std::string::npos) {
+                aggregateResults.push_back(std::to_string(filteredRows.size()));
+            } else if (func == "AVG") {
+                double avg = Aggregation::computeMean(colValues);
+                aggregateResults.push_back(std::to_string(avg));
+            } else if (func == "MIN") {
+                double min = Aggregation::computeMin(colValues);
+                aggregateResults.push_back(std::to_string(min));
+            } else if (func == "MAX") {
+                double max = Aggregation::computeMax(colValues);
+                aggregateResults.push_back(std::to_string(max));
+            } else if (func == "SUM") {
+                double sum = Aggregation::computeSum(colValues);
+                aggregateResults.push_back(std::to_string(sum));
+            } else {
+                aggregateResults.push_back(filteredRows.empty() ? "" : filteredRows[0][idx]);
+            }
+        } else {
+            aggregateResults.push_back("");
+        }
+    }
+    if (hasAggregate) {
+        for (const auto& res : aggregateResults)
+            std::cout << res << "\t";
+        std::cout << std::endl;
         return;
     }
 
-    // Step 2: Grouping (if GROUP BY is specified)
     if (!groupByColumns.empty()) {
         std::unordered_map<std::string, std::vector<std::vector<std::string>>> groups;
         for (const auto& row : filteredRows) {
@@ -130,11 +188,9 @@ void Table::selectRows(const std::vector<std::string>& selectColumns,
             }
             groups[key].push_back(row);
         }
-        // Print header.
         for (const auto& col : displayColumns)
             std::cout << col << "\t";
         std::cout << std::endl;
-        // For each group, compute aggregate row.
         for (const auto& kv : groups) {
             const auto& groupRows = kv.second;
             std::vector<std::string> resultRow;
@@ -158,26 +214,36 @@ void Table::selectRows(const std::vector<std::string>& selectColumns,
         return;
     }
 
-    // Step 3: Ordering (if ORDER BY is specified)
     if (!orderByColumns.empty()) {
         std::sort(filteredRows.begin(), filteredRows.end(), [&](const auto& a, const auto& b) {
-            for (const auto& colName : orderByColumns) {
+            for (const auto& token : orderByColumns) {
+                std::string colName = token;
+                bool desc = false;
+                size_t pos = toUpperCase(token).find(" DESC");
+                if (pos != std::string::npos) {
+                    desc = true;
+                    colName = trim(token.substr(0, pos));
+                } else {
+                    pos = toUpperCase(token).find(" ASC");
+                    if (pos != std::string::npos) {
+                        colName = trim(token.substr(0, pos));
+                    }
+                }
                 auto it = std::find(columns.begin(), columns.end(), colName);
                 if (it != columns.end()) {
                     int idx = std::distance(columns.begin(), it);
-                    if (a[idx] < b[idx]) return true;
-                    else if (a[idx] > b[idx]) return false;
+                    if (a[idx] == b[idx])
+                        continue;
+                    return desc ? (a[idx] > b[idx]) : (a[idx] < b[idx]);
                 }
             }
             return false;
         });
     }
 
-    // Step 4: Print header.
     for (const auto& col : displayColumns)
         std::cout << col << "\t";
     std::cout << std::endl;
-    // Print rows.
     for (const auto& row : filteredRows) {
         for (const auto& col : displayColumns) {
             auto it = std::find(columns.begin(), columns.end(), col);

@@ -63,10 +63,13 @@ int main() {
         } else if (qType == "DROP") {
             db.dropTable(query.tableName);
         } else if (qType == "ALTER") {
+            // Handle ALTER actions: ADD, DROP, and now RENAME
             if (query.alterAction == "ADD")
                 db.alterTableAddColumn(query.tableName, query.alterColumn);
             else if (query.alterAction == "DROP")
                 db.alterTableDropColumn(query.tableName, query.alterColumn.first);
+            else if (query.alterAction == "RENAME")
+                db.renameTable(query.tableName, query.newTableName);
         } else if (qType == "DESCRIBE") {
             db.describeTable(query.tableName);
         } else if (qType == "SHOW") {
@@ -77,6 +80,16 @@ int main() {
             db.commitTransaction();
         } else if (qType == "ROLLBACK") {
             db.rollbackTransaction();
+        } else if (qType == "TRUNCATE") {
+            db.truncateTable(query.tableName);
+        } else if (qType == "CREATEINDEX") {
+            db.createIndex(query.indexName, query.tableName, query.columnName);
+        } else if (qType == "DROPINDEX") {
+            db.dropIndex(query.indexName);
+        } else if (qType == "MERGE") {
+            db.mergeRecords(query.tableName, query.mergeCommand);
+        } else if (qType == "REPLACE") {
+            db.replaceInto(query.tableName, query.values);
         } else {
             std::cout << "Invalid command." << std::endl;
         }

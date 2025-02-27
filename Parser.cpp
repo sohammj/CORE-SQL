@@ -2,6 +2,15 @@
 #include "Utils.h"
 #include <sstream>
 #include <algorithm>
+#include <unordered_set>
+#include <iostream>
+
+// Removed duplicate functions:
+// - toUpperCase()
+// - toLowerCase()
+// - trim()
+// - isValidDataType()
+// (They are now properly sourced from Utils.h)
 
 Query Parser::parseQuery(const std::string& queryStr) {
     Query q;
@@ -11,10 +20,41 @@ Query Parser::parseQuery(const std::string& queryStr) {
     std::string command = toUpperCase(word);
 
     if (command == "CREATE") {
-        q.type = "CREATE";
-        iss >> word; // Expect "TABLE"
-        iss >> q.tableName;
-        q.columns = extractColumns(queryStr);
+        iss >> word;
+        if (toUpperCase(word) == "TABLE") {
+            q.type = "CREATE";
+            iss >> q.tableName;
+            q.columns = extractColumns(queryStr);
+    
+            // Validate duplicate column names and data types.
+            std::unordered_set<std::string> seen;
+            for (const auto &colPair : q.columns) {
+                if (seen.find(colPair.first) != seen.end()) {
+                    std::cerr << "Error: Duplicate column name '" << colPair.first 
+                              << "' in CREATE TABLE statement." << std::endl;
+                    q.columns.clear();
+                    return q;
+                }
+                seen.insert(colPair.first);
+                if (!isValidDataType(colPair.second)) {
+                    std::cerr << "Error: Invalid data type '" << colPair.second 
+                              << "' for column '" << colPair.first << "'." << std::endl;
+                    q.columns.clear();
+                    return q;
+                }
+            }
+        } else if (toUpperCase(word) == "INDEX") {
+            q.type = "CREATEINDEX";
+            iss >> q.indexName;
+            iss >> word; // Expect "ON"
+            iss >> q.tableName;
+            size_t parenStart = queryStr.find('(', queryStr.find(q.tableName));
+            size_t parenEnd = queryStr.find(')', parenStart);
+            if (parenStart != std::string::npos && parenEnd != std::string::npos) {
+                std::string col = queryStr.substr(parenStart + 1, parenEnd - parenStart - 1);
+                q.columnName = trim(col);
+            }
+        }
     } else if (command == "INSERT") {
         q.type = "INSERT";
         iss >> word; // Expect "INTO"
@@ -23,14 +63,12 @@ Query Parser::parseQuery(const std::string& queryStr) {
     } else if (command == "SELECT") {
         q.type = "SELECT";
         q.selectColumns = extractSelectColumns(queryStr);
-        // Look for FROM
         size_t fromPos = toUpperCase(queryStr).find("FROM");
         if (fromPos != std::string::npos) {
             std::istringstream issFrom(queryStr.substr(fromPos + 4));
             issFrom >> q.tableName;
         }
         q.condition = extractCondition(queryStr);
-        // ORDER BY extraction
         size_t orderPos = toUpperCase(queryStr).find("ORDER BY");
         if (orderPos != std::string::npos) {
             size_t endPos = queryStr.find_first_of("\n;", orderPos);
@@ -41,7 +79,6 @@ Query Parser::parseQuery(const std::string& queryStr) {
                 q.orderByColumns.push_back(trim(token));
             }
         }
-        // GROUP BY extraction
         size_t groupPos = toUpperCase(queryStr).find("GROUP BY");
         if (groupPos != std::string::npos) {
             size_t endPos = queryStr.find_first_of("\n;", groupPos);
@@ -52,23 +89,18 @@ Query Parser::parseQuery(const std::string& queryStr) {
                 q.groupByColumns.push_back(trim(token));
             }
         }
-        // HAVING extraction
         size_t havingPos = toUpperCase(queryStr).find("HAVING");
         if (havingPos != std::string::npos) {
             q.havingCondition = trim(queryStr.substr(havingPos + 6));
         }
-        // JOIN extraction (adjusted)
         size_t joinPos = toUpperCase(queryStr).find("JOIN");
         if (joinPos != std::string::npos) {
             q.isJoin = true;
-            // Extract join table name.
             std::istringstream issJoin(queryStr.substr(joinPos + 4));
             issJoin >> q.joinTable;
-            // Look for ON in the remainder of the query.
             size_t onPos = toUpperCase(queryStr).find("ON", joinPos);
             if (onPos != std::string::npos) {
                 std::string joinCond = queryStr.substr(onPos + 2);
-                // Optionally, remove any trailing semicolon.
                 joinCond = trim(joinCond);
                 if (!joinCond.empty() && joinCond.back() == ';') {
                     joinCond.pop_back();
@@ -88,25 +120,28 @@ Query Parser::parseQuery(const std::string& queryStr) {
         q.updates = extractUpdates(queryStr);
         q.condition = extractCondition(queryStr);
     } else if (command == "DROP") {
-        q.type = "DROP";
-        iss >> word; // Expect "TABLE"
-        iss >> q.tableName;
+        iss >> word;
+        if (toUpperCase(word) == "TABLE") {
+            q.type = "DROP";
+            iss >> q.tableName;
+        } else if (toUpperCase(word) == "INDEX") {
+            q.type = "DROPINDEX";
+            iss >> q.indexName;
+        }
     } else if (command == "ALTER") {
         q.type = "ALTER";
         iss >> word; // Expect "TABLE"
         iss >> q.tableName;
-        iss >> word; // Expect action: ADD or DROP
+        iss >> word; // Expect action: ADD, DROP, or RENAME
         q.alterAction = toUpperCase(word);
         if (q.alterAction == "ADD") {
             std::string nextToken;
             if (iss >> nextToken) {
-                // Check if the next token is "COLUMN"
                 if (toUpperCase(nextToken) == "COLUMN") {
                     std::string colName, colType;
                     iss >> colName >> colType;
                     q.alterColumn = { colName, colType };
                 } else {
-                    // Otherwise assume it's the column name followed by its type.
                     std::string colName = nextToken;
                     std::string colType;
                     iss >> colType;
@@ -114,12 +149,14 @@ Query Parser::parseQuery(const std::string& queryStr) {
                 }
             }
         } else if (q.alterAction == "DROP") {
-            // Optional "COLUMN" keyword may be present.
             iss >> word;
             if (toUpperCase(word) == "COLUMN")
                 iss >> q.alterColumn.first;
             else
                 q.alterColumn.first = word;
+        } else if (q.alterAction == "RENAME") {
+            iss >> word; // Expect "TO"
+            iss >> q.newTableName;
         }
     } else if (command == "DESCRIBE") {
         q.type = "DESCRIBE";
@@ -132,6 +169,21 @@ Query Parser::parseQuery(const std::string& queryStr) {
         q.type = "COMMIT";
     } else if (command == "ROLLBACK") {
         q.type = "ROLLBACK";
+    } else if (command == "TRUNCATE") {
+        q.type = "TRUNCATE";
+        iss >> word; // Expect "TABLE"
+        iss >> q.tableName;
+    } else if (command == "MERGE") {
+        q.type = "MERGE";
+        iss >> word; // Expect "INTO"
+        iss >> q.tableName;
+        size_t pos = queryStr.find(q.tableName);
+        q.mergeCommand = trim(queryStr.substr(pos + q.tableName.size()));
+    } else if (command == "REPLACE") {
+        q.type = "REPLACE";
+        iss >> word; // Expect "INTO"
+        iss >> q.tableName;
+        q.values = extractValues(queryStr);
     }
     return q;
 }
@@ -149,7 +201,6 @@ std::vector<std::vector<std::string>> Parser::extractValues(const std::string& q
         std::vector<std::string> valueSet;
         while (std::getline(iss, value, ',')) {
             value = trim(value);
-            // Remove surrounding single quotes, if present.
             if (!value.empty() && value.front() == '\'' && value.back() == '\'' && value.size() > 1)
                 value = value.substr(1, value.size() - 2);
             valueSet.push_back(value);
@@ -193,7 +244,6 @@ std::vector<std::pair<std::string, std::string>> Parser::extractUpdates(const st
         if (eq == std::string::npos) continue;
         std::string col = trim(update.substr(0, eq));
         std::string val = trim(update.substr(eq + 1));
-        // Remove surrounding single quotes from update value.
         if (!val.empty() && val.front() == '\'' && val.back() == '\'' && val.size() > 1)
             val = val.substr(1, val.size() - 2);
         updates.emplace_back(col, val);
@@ -221,7 +271,6 @@ std::string Parser::extractCondition(const std::string& query) {
     size_t pos = toUpperCase(query).find("WHERE");
     if (pos == std::string::npos)
         return "";
-    // End at ORDER BY, GROUP BY, or HAVING if present.
     size_t endPos = std::string::npos;
     size_t orderPos = toUpperCase(query).find("ORDER BY", pos);
     size_t groupPos = toUpperCase(query).find("GROUP BY", pos);

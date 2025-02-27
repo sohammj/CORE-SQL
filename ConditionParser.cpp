@@ -117,7 +117,7 @@ std::string ConditionParser::getNext() {
     return "";
 }
 
-bool ConditionParser::match(const std::string& token) {
+bool ConditionParser::matchCondition(const std::string& token) {
     if (peek() == token) {
         current++;
         return true;
@@ -153,9 +153,9 @@ ConditionExprPtr ConditionParser::parseTerm() {
 
 ConditionExprPtr ConditionParser::parseFactor() {
     // factor -> '(' expr ')' | comparison
-    if (match("(")) {
+    if (matchCondition("(")) {
         auto expr = parseExpression();
-        if (!match(")"))
+        if (!matchCondition(")"))
             throw std::runtime_error("Missing closing parenthesis");
         return expr;
     }

@@ -38,11 +38,22 @@ public:
     void beginTransaction();
     void commitTransaction();
     void rollbackTransaction();
+
+    // New functionalities
+    void truncateTable(const std::string& tableName);
+    void renameTable(const std::string& oldName, const std::string& newName);
+    void createIndex(const std::string& indexName, const std::string& tableName, const std::string& columnName);
+    void dropIndex(const std::string& indexName);
+    void mergeRecords(const std::string& tableName, const std::string& mergeCommand);
+    void replaceInto(const std::string& tableName, const std::vector<std::vector<std::string>>& values);
+
 private:
     std::unordered_map<std::string, Table> tables;
-    // For basic transaction simulation.
     bool inTransaction = false;
     std::unordered_map<std::string, Table> backupTables;
+
+    // Simple index storage: indexName -> pair<tableName, columnName>
+    std::unordered_map<std::string, std::pair<std::string, std::string>> indexes;
 };
 
 #endif // DATABASE_H
