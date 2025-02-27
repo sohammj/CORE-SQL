@@ -1,6 +1,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 #include "Database.h"
 #include "Parser.h"
 #include "Utils.h"
@@ -27,73 +28,73 @@ int main() {
         line = trim(line);
         commandBuffer += " " + line;
 
-        // Wait until at least one semicolon is found.
+        // Process when a semicolon is detected.
         if (commandBuffer.find(';') == std::string::npos) {
             continue;
         }
 
-        // Remove all semicolons.
-        while (commandBuffer.find(';') != std::string::npos) {
-            size_t pos = commandBuffer.find(';');
-            commandBuffer.erase(pos, 1);
+        // Use the split function from Utils.h to split the command buffer by semicolon.
+        std::vector<std::string> commands = split(commandBuffer, ';');
+        for (const auto &cmd : commands) {
+            std::string trimmedCmd = trim(cmd);
+            if (trimmedCmd.empty())
+                continue;
+            
+            // Check for exit commands.
+            std::string upperCmd = toUpperCase(trimmedCmd);
+            if (upperCmd == "EXIT" || upperCmd == "QUIT")
+                return 0;
+
+            // Process the complete command.
+            Query query = parser.parseQuery(trimmedCmd);
+            std::string qType = toUpperCase(query.type);
+
+            if (qType == "CREATE") {
+                db.createTable(query.tableName, query.columns);
+            } else if (qType == "INSERT") {
+                db.insertRecord(query.tableName, query.values);
+            } else if (qType == "SELECT") {
+                db.selectRecords(query.tableName, query.selectColumns, query.condition,
+                                 query.orderByColumns, query.groupByColumns, query.havingCondition,
+                                 query.isJoin, query.joinTable, query.joinCondition);
+            } else if (qType == "DELETE") {
+                db.deleteRecords(query.tableName, query.condition);
+            } else if (qType == "UPDATE") {
+                db.updateRecords(query.tableName, query.updates, query.condition);
+            } else if (qType == "DROP") {
+                db.dropTable(query.tableName);
+            } else if (qType == "ALTER") {
+                // Handle ALTER actions: ADD, DROP, and RENAME
+                if (query.alterAction == "ADD")
+                    db.alterTableAddColumn(query.tableName, query.alterColumn);
+                else if (query.alterAction == "DROP")
+                    db.alterTableDropColumn(query.tableName, query.alterColumn.first);
+                else if (query.alterAction == "RENAME")
+                    db.renameTable(query.tableName, query.newTableName);
+            } else if (qType == "DESCRIBE") {
+                db.describeTable(query.tableName);
+            } else if (qType == "SHOW") {
+                db.showTables();
+            } else if (qType == "BEGIN") {
+                db.beginTransaction();
+            } else if (qType == "COMMIT") {
+                db.commitTransaction();
+            } else if (qType == "ROLLBACK") {
+                db.rollbackTransaction();
+            } else if (qType == "TRUNCATE") {
+                db.truncateTable(query.tableName);
+            } else if (qType == "CREATEINDEX") {
+                db.createIndex(query.indexName, query.tableName, query.columnName);
+            } else if (qType == "DROPINDEX") {
+                db.dropIndex(query.indexName);
+            } else if (qType == "MERGE") {
+                db.mergeRecords(query.tableName, query.mergeCommand);
+            } else if (qType == "REPLACE") {
+                db.replaceInto(query.tableName, query.values);
+            } else {
+                std::cout << "Invalid command." << std::endl;
+            }
         }
-        commandBuffer = trim(commandBuffer);
-
-        // Check if the command is an exit command.
-        std::string upperCommand = toUpperCase(commandBuffer);
-        if (upperCommand == "EXIT" || upperCommand == "QUIT")
-            break;
-
-        // Process the complete command.
-        Query query = parser.parseQuery(commandBuffer);
-        std::string qType = toUpperCase(query.type);
-
-        if (qType == "CREATE") {
-            db.createTable(query.tableName, query.columns);
-        } else if (qType == "INSERT") {
-            db.insertRecord(query.tableName, query.values);
-        } else if (qType == "SELECT") {
-            db.selectRecords(query.tableName, query.selectColumns, query.condition,
-                             query.orderByColumns, query.groupByColumns, query.havingCondition,
-                             query.isJoin, query.joinTable, query.joinCondition);
-        } else if (qType == "DELETE") {
-            db.deleteRecords(query.tableName, query.condition);
-        } else if (qType == "UPDATE") {
-            db.updateRecords(query.tableName, query.updates, query.condition);
-        } else if (qType == "DROP") {
-            db.dropTable(query.tableName);
-        } else if (qType == "ALTER") {
-            // Handle ALTER actions: ADD, DROP, and now RENAME
-            if (query.alterAction == "ADD")
-                db.alterTableAddColumn(query.tableName, query.alterColumn);
-            else if (query.alterAction == "DROP")
-                db.alterTableDropColumn(query.tableName, query.alterColumn.first);
-            else if (query.alterAction == "RENAME")
-                db.renameTable(query.tableName, query.newTableName);
-        } else if (qType == "DESCRIBE") {
-            db.describeTable(query.tableName);
-        } else if (qType == "SHOW") {
-            db.showTables();
-        } else if (qType == "BEGIN") {
-            db.beginTransaction();
-        } else if (qType == "COMMIT") {
-            db.commitTransaction();
-        } else if (qType == "ROLLBACK") {
-            db.rollbackTransaction();
-        } else if (qType == "TRUNCATE") {
-            db.truncateTable(query.tableName);
-        } else if (qType == "CREATEINDEX") {
-            db.createIndex(query.indexName, query.tableName, query.columnName);
-        } else if (qType == "DROPINDEX") {
-            db.dropIndex(query.indexName);
-        } else if (qType == "MERGE") {
-            db.mergeRecords(query.tableName, query.mergeCommand);
-        } else if (qType == "REPLACE") {
-            db.replaceInto(query.tableName, query.values);
-        } else {
-            std::cout << "Invalid command." << std::endl;
-        }
-
         commandBuffer.clear();
     }
     return 0;

@@ -3,7 +3,10 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
 
+// Create table
 void Database::createTable(const std::string& tableName,
     const std::vector<std::pair<std::string, std::string>>& cols) {
     std::string lowerName = toLowerCase(tableName);
@@ -209,24 +212,30 @@ void Database::beginTransaction() {
     if (!inTransaction) {
         backupTables = tables;
         inTransaction = true;
+        std::cout << "Transaction started." << std::endl;
+    } else {
+        std::cout << "Transaction already in progress." << std::endl;
     }
-    std::cout << "Transaction started." << std::endl;
 }
 
 void Database::commitTransaction() {
-    if (inTransaction) {
-        inTransaction = false;
-        backupTables.clear();
+    if (!inTransaction) {
+       std::cout << "No active transaction to commit." << std::endl;
+       return;
     }
+    inTransaction = false;
+    backupTables.clear();
     std::cout << "Transaction committed." << std::endl;
 }
 
 void Database::rollbackTransaction() {
-    if (inTransaction) {
-        tables = backupTables;
-        backupTables.clear();
-        inTransaction = false;
+    if (!inTransaction) {
+       std::cout << "No active transaction to rollback." << std::endl;
+       return;
     }
+    tables = backupTables;
+    backupTables.clear();
+    inTransaction = false;
     std::cout << "Transaction rolled back." << std::endl;
 }
 
@@ -273,8 +282,174 @@ void Database::dropIndex(const std::string& indexName) {
 }
 
 void Database::mergeRecords(const std::string& tableName, const std::string& mergeCommand) {
-    std::cout << "MERGE command received for table " << tableName << ": " << mergeCommand << std::endl;
+    // --- Step 1: Locate key clauses ---
+    // Expected syntax:
+    // MERGE INTO tableName USING (SELECT ... AS col, ... ) AS src
+    // ON tableName.col = src.col
+    // WHEN MATCHED THEN UPDATE SET col = <value>, ...
+    // WHEN NOT MATCHED THEN INSERT VALUES (<value>, ...);
+    std::string commandUpper = toUpperCase(mergeCommand);
+    size_t usingPos = commandUpper.find("USING");
+    size_t onPos = commandUpper.find("ON");
+    size_t whenMatchedPos = commandUpper.find("WHEN MATCHED THEN UPDATE SET");
+    size_t whenNotMatchedPos = commandUpper.find("WHEN NOT MATCHED THEN INSERT VALUES");
+    
+    if (usingPos == std::string::npos || onPos == std::string::npos ||
+        whenMatchedPos == std::string::npos || whenNotMatchedPos == std::string::npos) {
+        std::cout << "MERGE: Invalid MERGE syntax." << std::endl;
+        return;
+    }
+    
+    // --- Step 2: Extract the source subquery from the USING clause ---
+    size_t sourceStart = mergeCommand.find("(", usingPos);
+    size_t sourceEnd = mergeCommand.find(")", sourceStart);
+    if (sourceStart == std::string::npos || sourceEnd == std::string::npos) {
+        std::cout << "MERGE: Invalid source subquery syntax." << std::endl;
+        return;
+    }
+    std::string sourceSubquery = mergeCommand.substr(sourceStart + 1, sourceEnd - sourceStart - 1);
+    // Expect the subquery to start with SELECT.
+    size_t selectPos = toUpperCase(sourceSubquery).find("SELECT");
+    if (selectPos == std::string::npos) {
+        std::cout << "MERGE: Source subquery must start with SELECT." << std::endl;
+        return;
+    }
+    std::string selectExpressions = sourceSubquery.substr(selectPos + 6);
+    // (For simplicity, we assume the SELECT returns a comma‑separated list of expressions)
+    std::vector<std::string> exprList = split(selectExpressions, ',');
+    // Build a source record map: alias (lowercase) -> literal value.
+    std::unordered_map<std::string, std::string> srcRecord;
+    for (const auto &expr : exprList) {
+        std::string trimmedExpr = trim(expr);
+        size_t asPos = toUpperCase(trimmedExpr).find("AS");
+        if (asPos == std::string::npos)
+            continue;
+        std::string literal = trim(trimmedExpr.substr(0, asPos));
+        std::string alias = trim(trimmedExpr.substr(asPos + 2));
+        // Remove quotes if the literal is quoted.
+        if (!literal.empty() && literal.front() == '\'' && literal.back() == '\'' && literal.size() > 1)
+            literal = literal.substr(1, literal.size() - 2);
+        srcRecord[toLowerCase(alias)] = literal;
+    }
+    
+    // --- Step 3: Parse the ON clause ---
+    // Expected format: ON tableName.col = src.col
+    std::string onClause = mergeCommand.substr(onPos, whenMatchedPos - onPos);
+    // Remove the leading "ON"
+    onClause = trim(onClause.substr(2));
+    size_t eqPos = onClause.find('=');
+    if (eqPos == std::string::npos) {
+        std::cout << "MERGE: Invalid ON clause." << std::endl;
+        return;
+    }
+    std::string targetExpr = trim(onClause.substr(0, eqPos));
+    std::string srcExpr = trim(onClause.substr(eqPos + 1));
+    size_t dotPos = targetExpr.find('.');
+    std::string targetColumn = (dotPos != std::string::npos) ? toLowerCase(trim(targetExpr.substr(dotPos + 1))) : toLowerCase(targetExpr);
+    dotPos = srcExpr.find('.');
+    std::string srcColumn = (dotPos != std::string::npos) ? toLowerCase(trim(srcExpr.substr(dotPos + 1))) : toLowerCase(srcExpr);
+    
+    // --- Step 4: Parse the UPDATE clause (WHEN MATCHED) ---
+    size_t updateClauseStart = whenMatchedPos + std::string("WHEN MATCHED THEN UPDATE SET").length();
+    std::string updateClause = mergeCommand.substr(updateClauseStart, whenNotMatchedPos - updateClauseStart);
+    updateClause = trim(updateClause);
+    // Split assignments by commas.
+    std::unordered_map<std::string, std::string> updateAssignments;
+    {
+        std::vector<std::string> assignments = split(updateClause, ',');
+        for (const auto &assign : assignments) {
+            size_t eqAssign = assign.find('=');
+            if (eqAssign == std::string::npos)
+                continue;
+            std::string col = toLowerCase(trim(assign.substr(0, eqAssign)));
+            std::string val = trim(assign.substr(eqAssign + 1));
+            // Replace references like "src.col" with the corresponding source value.
+            if (toUpperCase(val).find("SRC.") != std::string::npos) {
+                size_t pos = toUpperCase(val).find("SRC.");
+                std::string refCol = toLowerCase(trim(val.substr(pos + 4)));
+                if (srcRecord.find(refCol) != srcRecord.end()) {
+                    val = srcRecord[refCol];
+                }
+            } else if (!val.empty() && val.front() == '\'' && val.back() == '\'' && val.size() > 1) {
+                val = val.substr(1, val.size() - 2);
+            }
+            updateAssignments[col] = val;
+        }
+    }
+    
+    // --- Step 5: Parse the INSERT clause (WHEN NOT MATCHED) ---
+    size_t insertClauseStart = whenNotMatchedPos + std::string("WHEN NOT MATCHED THEN INSERT VALUES").length();
+    std::string insertClause = mergeCommand.substr(insertClauseStart);
+    insertClause = trim(insertClause);
+    // Remove surrounding parentheses if present.
+    if (!insertClause.empty() && insertClause.front() == '(' && insertClause.back() == ')') {
+        insertClause = insertClause.substr(1, insertClause.size() - 2);
+        insertClause = trim(insertClause);
+    }
+    std::vector<std::string> insertValues = split(insertClause, ',');
+    for (auto &val : insertValues) {
+        val = trim(val);
+        if (toUpperCase(val).find("SRC.") != std::string::npos) {
+            size_t pos = toUpperCase(val).find("SRC.");
+            std::string refCol = toLowerCase(trim(val.substr(pos + 4)));
+            if (srcRecord.find(refCol) != srcRecord.end())
+                val = srcRecord[refCol];
+        } else if (!val.empty() && val.front() == '\'' && val.back() == '\'' && val.size() > 1) {
+            val = val.substr(1, val.size() - 2);
+        }
+    }
+    
+    // --- Step 6: Apply the MERGE to the target table ---
+    std::string lowerTable = toLowerCase(tableName);
+    if (tables.find(lowerTable) == tables.end()) {
+        std::cout << "MERGE: Table " << tableName << " does not exist." << std::endl;
+        return;
+    }
+    const auto& targetCols = tables[lowerTable].getColumns();
+    // Find the index of the target column in the table.
+    int targetIndex = -1;
+    for (size_t i = 0; i < targetCols.size(); i++) {
+        if (toLowerCase(targetCols[i]) == targetColumn) {
+            targetIndex = i;
+            break;
+        }
+    }
+    if (targetIndex == -1) {
+        std::cout << "MERGE: Target column " << targetColumn << " not found in table." << std::endl;
+        return;
+    }
+    
+    bool matched = false;
+    // Check each row for a match on the ON condition.
+    for (auto &row : tables[lowerTable].getRowsNonConst()) {
+        if (row.size() > targetIndex && toLowerCase(row[targetIndex]) == toLowerCase(srcRecord[srcColumn])) {
+            // When matched, update the row using the UPDATE assignments.
+            for (size_t j = 0; j < targetCols.size(); j++) {
+                std::string colName = toLowerCase(targetCols[j]);
+                if (updateAssignments.find(colName) != updateAssignments.end()) {
+                    row[j] = updateAssignments[colName];
+                }
+            }
+            matched = true;
+        }
+    }
+    
+    if (!matched) {
+        // No matching row found; build a new row using the INSERT values.
+        // For simplicity, assume the number of insert values equals the number of columns.
+        std::vector<std::string> newRow;
+        for (size_t i = 0; i < targetCols.size(); i++) {
+            if (i < insertValues.size())
+                newRow.push_back(insertValues[i]);
+            else
+                newRow.push_back("");
+        }
+        tables[lowerTable].addRow(newRow);
+    }
+    
+    std::cout << "MERGE command executed on " << tableName << "." << std::endl;
 }
+
 
 void Database::replaceInto(const std::string& tableName, const std::vector<std::vector<std::string>>& values) {
     std::string lowerName = toLowerCase(tableName);

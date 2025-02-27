@@ -5,13 +5,6 @@
 #include <unordered_set>
 #include <iostream>
 
-// Removed duplicate functions:
-// - toUpperCase()
-// - toLowerCase()
-// - trim()
-// - isValidDataType()
-// (They are now properly sourced from Utils.h)
-
 Query Parser::parseQuery(const std::string& queryStr) {
     Query q;
     std::istringstream iss(queryStr);

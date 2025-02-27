@@ -22,7 +22,7 @@ struct Query {
     std::vector<std::string> orderByColumns;
     std::vector<std::string> groupByColumns;
     // For ALTER TABLE: action and column info
-    std::string alterAction; // "ADD" or "DROP"
+    std::string alterAction; // "ADD" or "DROP" or "RENAME"
     std::pair<std::string, std::string> alterColumn; // column name and type (for ADD)
     // For JOIN in SELECT:
     bool isJoin = false;
