@@ -97,6 +97,19 @@ void Table::clearRows() {
     rows.clear();
 }
 
+void Table::sortRows(const std::string& columnName, bool ascending) {
+    auto it = std::find(columns.begin(), columns.end(), columnName);
+    if (it == columns.end()) {
+        std::cerr << "Error: Column " << columnName << " does not exist." << std::endl;
+        return;
+    }
+    int columnIndex = std::distance(columns.begin(), it);
+
+    std::sort(rows.begin(), rows.end(), [columnIndex, ascending](const std::vector<std::string>& a, const std::vector<std::string>& b) {
+        return ascending ? (a[columnIndex] < b[columnIndex]) : (a[columnIndex] > b[columnIndex]);
+    });
+}
+
 static bool parseAggregate(const std::string& colExpr, std::string& func, std::string& colName) {
     size_t pos1 = colExpr.find('(');
     size_t pos2 = colExpr.find(')');

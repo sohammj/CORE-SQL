@@ -5,6 +5,8 @@
 #include <vector>
 #include <unordered_map>
 #include "Table.h"
+#include "Storage.h"
+#include <queue>
 
 class Database {
 public:
@@ -47,6 +49,11 @@ public:
     void mergeRecords(const std::string& tableName, const std::string& mergeCommand);
     void replaceInto(const std::string& tableName, const std::vector<std::vector<std::string>>& values);
 
+    // Sorting & Recent Photos Tracking
+    void sortPhotos(const std::string& tableName, const std::string& column, bool ascending);
+    void trackRecentPhoto(const std::string& filename);
+    void showRecentPhotos();
+
 private:
     std::unordered_map<std::string, Table> tables;
     bool inTransaction = false;
@@ -54,6 +61,8 @@ private:
 
     // Simple index storage: indexName -> pair<tableName, columnName>
     std::unordered_map<std::string, std::pair<std::string, std::string>> indexes;
+
+    std::priority_queue<std::string> recentPhotos;
 };
 
 #endif // DATABASE_H

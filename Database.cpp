@@ -472,3 +472,26 @@ void Database::replaceInto(const std::string& tableName, const std::vector<std::
     }
     std::cout << "REPLACE INTO executed on " << tableName << "." << std::endl;
 }
+
+void Database::sortPhotos(const std::string& tableName, const std::string& column, bool ascending) {
+    std::string lowerName = toLowerCase(tableName);
+    if (tables.find(lowerName) == tables.end()) {
+        std::cout << "Table " << tableName << " does not exist." << std::endl;
+        return;
+    }
+    tables[lowerName].sortRows(column, ascending);
+    std::cout << "Photos sorted in " << tableName << "." << std::endl;
+}
+
+void Database::trackRecentPhoto(const std::string& filename) {
+    recentPhotos.push(filename);
+    std::cout << "Photo " << filename << " tracked as recent." << std::endl;
+}
+
+void Database::showRecentPhotos() {
+    std::cout << "Recent Photos:" << std::endl;
+    while (!recentPhotos.empty()) {
+        std::cout << recentPhotos.top() << std::endl;
+        recentPhotos.pop();
+    }
+}

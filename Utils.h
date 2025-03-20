@@ -46,11 +46,16 @@ static std::vector<std::string> split(const std::string &s, char delimiter) {
     return tokens;
 }
 
+
 // Validates the data type.
 // Supported types: INT, VARCHAR, TEXT, FLOAT, BOOLEAN
 inline bool isValidDataType(const std::string& type) {
-    // Using toUpperCase to ensure case-insensitive matching.
-    static const std::string validTypes[] = {"INT", "VARCHAR", "TEXT", "FLOAT", "BOOLEAN"};
+    static const std::string validTypes[] = {
+        "INT", "VARCHAR", "TEXT", "FLOAT", "BOOLEAN", 
+        "CHAR", "SMALLINT", "NUMERIC", "REAL", "DOUBLE PRECISION", 
+        "DATE", "TIME", "TIMESTAMP", "BRANCH", "CUSTOMER", 
+        "LOAN", "BORROWER", "ACCOUNT", "DEPOSITOR"
+    };
     std::string upperType = toUpperCase(type);
     for (const auto& vt : validTypes) {
         if (upperType == vt)

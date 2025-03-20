@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <functional> // For std::function
 
 class Table {
 public:
@@ -23,9 +24,13 @@ public:
                     const std::string& condition);
     void clearRows(); // New: remove all rows
 
+    // New: Sort rows based on a column
+    void sortRows(const std::string& columnName, bool ascending);
+
     const std::vector<std::string>& getColumns() const { return columns; }
     const std::vector<std::vector<std::string>>& getRows() const { return rows; }
     std::vector<std::vector<std::string>>& getRowsNonConst() { return rows; }
+
 private:
     std::vector<std::string> columns;
     std::vector<std::string> columnTypes;
