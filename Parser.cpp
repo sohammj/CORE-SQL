@@ -1,9 +1,13 @@
 #include "Parser.h"
 #include "Utils.h"
+#include "ConditionParser.h"
+#include "Aggregation.h"
+#include <iostream>
 #include <sstream>
 #include <algorithm>
-#include <unordered_set>
-#include <iostream>
+#include <unordered_map>
+#include <stdexcept>
+#include <regex>
 
 Query Parser::parseQuery(const std::string& queryStr) {
     Query q;
@@ -12,160 +16,96 @@ Query Parser::parseQuery(const std::string& queryStr) {
     iss >> word;
     std::string command = toUpperCase(word);
 
+    // WITH clause should be processed first
+    if (command == "WITH") {
+        q.withClauses = parseWithClause(queryStr);
+        
+        // Find the main query part after WITH clause
+        size_t mainQueryPos = queryStr.find(";", 0);
+        while (mainQueryPos != std::string::npos) {
+            if (mainQueryPos + 1 < queryStr.length() &&
+                queryStr[mainQueryPos + 1] != ' ' &&
+                queryStr[mainQueryPos + 1] != '\n') {
+                mainQueryPos = queryStr.find(";", mainQueryPos + 1);
+            } else {
+                break;
+            }
+        }
+        
+        if (mainQueryPos == std::string::npos) {
+            mainQueryPos = queryStr.find("SELECT", 4);
+            if (mainQueryPos == std::string::npos) {
+                throw DatabaseException("Invalid WITH clause syntax");
+            }
+        } else {
+            mainQueryPos++; // Skip the semicolon
+        }
+        
+        // Parse the main query
+        std::string mainQuery = queryStr.substr(mainQueryPos);
+        return parseQuery(mainQuery);
+    }
+
     if (command == "CREATE") {
         iss >> word;
-        if (toUpperCase(word) == "TABLE") {
-            q.type = "CREATE";
-            iss >> q.tableName;
-            q.columns = extractColumns(queryStr);
-    
-            // Validate duplicate column names and data types.
-            std::unordered_set<std::string> seen;
-            for (const auto &colPair : q.columns) {
-                if (seen.find(colPair.first) != seen.end()) {
-                    std::cerr << "Error: Duplicate column name '" << colPair.first 
-                              << "' in CREATE TABLE statement." << std::endl;
-                    q.columns.clear();
-                    return q;
-                }
-                seen.insert(colPair.first);
-                if (!isValidDataType(colPair.second)) {
-                    std::cerr << "Error: Invalid data type '" << colPair.second 
-                              << "' for column '" << colPair.first << "'." << std::endl;
-                    q.columns.clear();
-                    return q;
-                }
-            }
-        } else if (toUpperCase(word) == "INDEX") {
-            q.type = "CREATEINDEX";
-            iss >> q.indexName;
-            iss >> word; // Expect "ON"
-            iss >> q.tableName;
-            size_t parenStart = queryStr.find('(', queryStr.find(q.tableName));
-            size_t parenEnd = queryStr.find(')', parenStart);
-            if (parenStart != std::string::npos && parenEnd != std::string::npos) {
-                std::string col = queryStr.substr(parenStart + 1, parenEnd - parenStart - 1);
-                q.columnName = trim(col);
-            }
-        }
-    } else if (command == "INSERT") {
-        q.type = "INSERT";
-        iss >> word; // Expect "INTO"
-        iss >> q.tableName;
-        q.values = extractValues(queryStr);
-    } else if (command == "SELECT") {
-        q.type = "SELECT";
-        q.selectColumns = extractSelectColumns(queryStr);
-        size_t fromPos = toUpperCase(queryStr).find("FROM");
-        if (fromPos != std::string::npos) {
-            std::istringstream issFrom(queryStr.substr(fromPos + 4));
-            issFrom >> q.tableName;
-        }
-        q.condition = extractCondition(queryStr);
-        size_t orderPos = toUpperCase(queryStr).find("ORDER BY");
-        if (orderPos != std::string::npos) {
-            size_t endPos = queryStr.find_first_of("\n;", orderPos);
-            std::string orderStr = queryStr.substr(orderPos + 8, endPos - orderPos - 8);
-            std::istringstream issOrder(orderStr);
-            std::string token;
-            while (std::getline(issOrder, token, ',')) {
-                q.orderByColumns.push_back(trim(token));
-            }
-        }
-        size_t groupPos = toUpperCase(queryStr).find("GROUP BY");
-        if (groupPos != std::string::npos) {
-            size_t endPos = queryStr.find_first_of("\n;", groupPos);
-            std::string groupStr = queryStr.substr(groupPos + 8, endPos - groupPos - 8);
-            std::istringstream issGroup(groupStr);
-            std::string token;
-            while (std::getline(issGroup, token, ',')) {
-                q.groupByColumns.push_back(trim(token));
-            }
-        }
-        size_t havingPos = toUpperCase(queryStr).find("HAVING");
-        if (havingPos != std::string::npos) {
-            q.havingCondition = trim(queryStr.substr(havingPos + 6));
-        }
-        size_t joinPos = toUpperCase(queryStr).find("JOIN");
-        if (joinPos != std::string::npos) {
-            q.isJoin = true;
-            std::istringstream issJoin(queryStr.substr(joinPos + 4));
-            issJoin >> q.joinTable;
-            size_t onPos = toUpperCase(queryStr).find("ON", joinPos);
-            if (onPos != std::string::npos) {
-                std::string joinCond = queryStr.substr(onPos + 2);
-                joinCond = trim(joinCond);
-                if (!joinCond.empty() && joinCond.back() == ';') {
-                    joinCond.pop_back();
-                    joinCond = trim(joinCond);
-                }
-                q.joinCondition = joinCond;
-            }
-        }
-    } else if (command == "DELETE") {
-        q.type = "DELETE";
-        iss >> word; // Expect "FROM"
-        iss >> q.tableName;
-        q.condition = extractCondition(queryStr);
-    } else if (command == "UPDATE") {
-        q.type = "UPDATE";
-        iss >> q.tableName;
-        q.updates = extractUpdates(queryStr);
-        q.condition = extractCondition(queryStr);
-    } else if (command == "DROP") {
-        iss >> word;
-        if (toUpperCase(word) == "TABLE") {
-            q.type = "DROP";
-            iss >> q.tableName;
-        } else if (toUpperCase(word) == "INDEX") {
-            q.type = "DROPINDEX";
-            iss >> q.indexName;
+        std::string objectType = toUpperCase(word);
+        
+        if (objectType == "TABLE") {
+            return parseCreateTable(queryStr);
+        } else if (objectType == "INDEX") {
+            return parseCreateIndex(queryStr);
+        } else if (objectType == "VIEW") {
+            return parseCreateView(queryStr);
+        } else if (objectType == "TYPE") {
+            return parseCreateType(queryStr);
+        } else if (objectType == "ASSERTION") {
+            return parseCreateAssertion(queryStr);
         }
     } else if (command == "ALTER") {
-        q.type = "ALTER";
+        return parseAlterTable(queryStr);
+    } else if (command == "DROP") {
+        iss >> word;
+        std::string objectType = toUpperCase(word);
+        
+        q.type = "DROP" + objectType;
+        iss >> q.tableName; // This works for table, view, index, etc.
+        
+        // Special case for index
+        if (objectType == "INDEX") {
+            q.indexName = q.tableName;
+            q.tableName = "";
+        }
+    } else if (command == "INSERT") {
+        return parseInsert(queryStr);
+    } else if (command == "SELECT") {
+        return parseSelect(queryStr);
+    } else if (command == "UPDATE") {
+        return parseUpdate(queryStr);
+    } else if (command == "DELETE") {
+        return parseDelete(queryStr);
+    } else if (command == "GRANT") {
+        return parseGrant(queryStr);
+    } else if (command == "REVOKE") {
+        return parseRevoke(queryStr);
+    } else if (command == "TRUNCATE") {
+        q.type = "TRUNCATE";
         iss >> word; // Expect "TABLE"
         iss >> q.tableName;
-        iss >> word; // Expect action: ADD, DROP, or RENAME
-        q.alterAction = toUpperCase(word);
-        if (q.alterAction == "ADD") {
-            std::string nextToken;
-            if (iss >> nextToken) {
-                if (toUpperCase(nextToken) == "COLUMN") {
-                    std::string colName, colType;
-                    iss >> colName >> colType;
-                    q.alterColumn = { colName, colType };
-                } else {
-                    std::string colName = nextToken;
-                    std::string colType;
-                    iss >> colType;
-                    q.alterColumn = { colName, colType };
-                }
-            }
-        } else if (q.alterAction == "DROP") {
-            iss >> word;
-            if (toUpperCase(word) == "COLUMN")
-                iss >> q.alterColumn.first;
-            else
-                q.alterColumn.first = word;
-        } else if (q.alterAction == "RENAME") {
-            iss >> word; // Expect "TO"
-            iss >> q.newTableName;
-        }
     } else if (command == "DESCRIBE") {
         q.type = "DESCRIBE";
         iss >> q.tableName;
     } else if (command == "SHOW") {
         q.type = "SHOW";
+        iss >> word; // Optional object type (tables, views, etc.)
+        if (!word.empty()) {
+            q.tableName = word; // Reuse tableName for the object type
+        }
     } else if (command == "BEGIN") {
         q.type = "BEGIN";
     } else if (command == "COMMIT") {
         q.type = "COMMIT";
     } else if (command == "ROLLBACK") {
         q.type = "ROLLBACK";
-    } else if (command == "TRUNCATE") {
-        q.type = "TRUNCATE";
-        iss >> word; // Expect "TABLE"
-        iss >> q.tableName;
     } else if (command == "MERGE") {
         q.type = "MERGE";
         iss >> word; // Expect "INTO"
@@ -178,103 +118,829 @@ Query Parser::parseQuery(const std::string& queryStr) {
         iss >> q.tableName;
         q.values = extractValues(queryStr);
     }
+    
     return q;
 }
 
 std::vector<std::vector<std::string>> Parser::extractValues(const std::string& query) {
     std::vector<std::vector<std::string>> values;
-    size_t start = 0;
-    while ((start = query.find('(', start)) != std::string::npos) {
-        ++start;
-        size_t end = query.find(')', start);
-        if (end == std::string::npos) break;
-        std::string valuesStr = query.substr(start, end - start);
-        std::istringstream iss(valuesStr);
+    
+    // Find all value lists between parentheses
+    std::regex valuesRegex(R"(\((.*?)\))");
+    std::string::const_iterator searchStart(query.cbegin());
+    std::smatch match;
+    
+    while (std::regex_search(searchStart, query.cend(), match, valuesRegex)) {
+        std::string valueList = match[1];
+        std::vector<std::string> rowValues;
+        
+        // Split comma-separated values
+        std::istringstream valueStream(valueList);
         std::string value;
-        std::vector<std::string> valueSet;
-        while (std::getline(iss, value, ',')) {
-            value = trim(value);
-            if (!value.empty() && value.front() == '\'' && value.back() == '\'' && value.size() > 1)
-                value = value.substr(1, value.size() - 2);
-            valueSet.push_back(value);
+        bool inQuotes = false;
+        std::string currentValue;
+        
+        for (char c : valueList) {
+            if (c == '\'' && (currentValue.empty() || currentValue.back() != '\\')) {
+                inQuotes = !inQuotes;
+                currentValue += c;
+            } else if (c == ',' && !inQuotes) {
+                rowValues.push_back(trim(currentValue));
+                currentValue.clear();
+            } else {
+                currentValue += c;
+            }
         }
-        values.push_back(valueSet);
-        start = end + 1;
+        
+        if (!currentValue.empty()) {
+            rowValues.push_back(trim(currentValue));
+        }
+        
+        // Process each value (remove quotes, etc.)
+        for (auto& val : rowValues) {
+            val = trim(val);
+            if (val.size() >= 2 && val.front() == '\'' && val.back() == '\'') {
+                val = val.substr(1, val.size() - 2);
+            }
+        }
+        
+        values.push_back(rowValues);
+        searchStart = match.suffix().first;
     }
+    
     return values;
 }
 
 std::vector<std::pair<std::string, std::string>> Parser::extractColumns(const std::string& query) {
     std::vector<std::pair<std::string, std::string>> cols;
+    
+    // Find column definitions between parentheses
     size_t start = query.find('(');
-    size_t end = query.find(')', start);
-    if (start == std::string::npos || end == std::string::npos)
+    size_t end = query.find_last_of(')');
+    
+    if (start == std::string::npos || end == std::string::npos) {
         return cols;
-    std::string colsStr = query.substr(start + 1, end - start - 1);
-    std::istringstream iss(colsStr);
-    std::string col;
-    while (std::getline(iss, col, ',')) {
-        std::istringstream colStream(col);
-        std::string colName, colType;
-        colStream >> colName >> colType;
-        cols.emplace_back(trim(colName), trim(colType));
     }
+    
+    std::string colsStr = query.substr(start + 1, end - start - 1);
+    
+    // Handle multi-line, comma-separated definitions
+    std::istringstream colStream(colsStr);
+    std::string line;
+    std::string currentDef;
+    int parenLevel = 0;
+    
+    while (std::getline(colStream, line)) {
+        // Count parentheses to handle nested definitions
+        for (char c : line) {
+            if (c == '(') parenLevel++;
+            else if (c == ')') parenLevel--;
+        }
+        
+        if (!currentDef.empty()) {
+            currentDef += " ";
+        }
+        currentDef += line;
+        
+        // If balanced parentheses and ends with comma, or last line
+        if ((parenLevel == 0 && !currentDef.empty() && currentDef.back() == ',') ||
+            colStream.eof()) {
+            
+            // Remove trailing comma if present
+            if (!currentDef.empty() && currentDef.back() == ',') {
+                currentDef.pop_back();
+            }
+            
+            // Extract column name and type
+            std::istringstream defStream(currentDef);
+            std::string colName, colType;
+            defStream >> colName >> colType;
+            
+            // Handle longer type declarations like CHAR(255)
+            if (colType.find('(') != std::string::npos && colType.find(')') == std::string::npos) {
+                std::string remainder;
+                defStream >> remainder;
+                colType += " " + remainder;
+            }
+            
+            cols.emplace_back(trim(colName), trim(colType));
+            currentDef.clear();
+        }
+    }
+    
     return cols;
+}
+
+std::vector<Constraint> Parser::extractConstraints(const std::string& query) {
+    std::vector<Constraint> constraints;
+    
+    // Find column definitions between parentheses
+    size_t start = query.find('(');
+    size_t end = query.find_last_of(')');
+    
+    if (start == std::string::npos || end == std::string::npos) {
+        return constraints;
+    }
+    
+    std::string defsStr = query.substr(start + 1, end - start - 1);
+    
+    // Regex patterns for different constraints
+    std::regex primaryKeyRegex(R"(CONSTRAINT\s+(\w+)\s+PRIMARY\s+KEY\s*\((.*?)\))");
+    std::regex foreignKeyRegex(R"(CONSTRAINT\s+(\w+)\s+FOREIGN\s+KEY\s*\((.*?)\)\s+REFERENCES\s+(\w+)\s*(?:\((.*?)\))?)");
+    std::regex uniqueRegex(R"(CONSTRAINT\s+(\w+)\s+UNIQUE\s*\((.*?)\))");
+    std::regex checkRegex(R"(CONSTRAINT\s+(\w+)\s+CHECK\s*\((.*?)\))");
+    std::regex notNullRegex(R"(CONSTRAINT\s+(\w+)\s+NOT\s+NULL\s*\((.*?)\))");
+    
+    std::string::const_iterator searchStart(defsStr.cbegin());
+    std::smatch match;
+    
+    // Extract PRIMARY KEY constraints
+    while (std::regex_search(searchStart, defsStr.cend(), match, primaryKeyRegex)) {
+        Constraint c(Constraint::Type::PRIMARY_KEY, match[1]);
+        
+        // Split comma-separated column list
+        std::string colList = match[2];
+        std::istringstream colStream(colList);
+        std::string col;
+        while (std::getline(colStream, col, ',')) {
+            c.columns.push_back(trim(col));
+        }
+        
+        constraints.push_back(c);
+        searchStart = match.suffix().first;
+    }
+    
+    // Extract FOREIGN KEY constraints
+    searchStart = defsStr.cbegin();
+    while (std::regex_search(searchStart, defsStr.cend(), match, foreignKeyRegex)) {
+        Constraint c(Constraint::Type::FOREIGN_KEY, match[1]);
+        
+        // Split comma-separated column list
+        std::string colList = match[2];
+        std::istringstream colStream(colList);
+        std::string col;
+        while (std::getline(colStream, col, ',')) {
+            c.columns.push_back(trim(col));
+        }
+        
+        c.referencedTable = match[3];
+        
+        // Referenced columns (if specified)
+        if (match[4].matched) {
+            std::string refColList = match[4];
+            std::istringstream refColStream(refColList);
+            std::string refCol;
+            while (std::getline(refColStream, refCol, ',')) {
+                c.referencedColumns.push_back(trim(refCol));
+            }
+        }
+        
+        // Check for CASCADE options
+        if (defsStr.find("ON DELETE CASCADE") != std::string::npos) {
+            c.cascadeDelete = true;
+        }
+        
+        if (defsStr.find("ON UPDATE CASCADE") != std::string::npos) {
+            c.cascadeUpdate = true;
+        }
+        
+        constraints.push_back(c);
+        searchStart = match.suffix().first;
+    }
+    
+    // Extract UNIQUE constraints
+    searchStart = defsStr.cbegin();
+    while (std::regex_search(searchStart, defsStr.cend(), match, uniqueRegex)) {
+        Constraint c(Constraint::Type::UNIQUE, match[1]);
+        
+        // Split comma-separated column list
+        std::string colList = match[2];
+        std::istringstream colStream(colList);
+        std::string col;
+        while (std::getline(colStream, col, ',')) {
+            c.columns.push_back(trim(col));
+        }
+        
+        constraints.push_back(c);
+        searchStart = match.suffix().first;
+    }
+    
+    // Extract CHECK constraints
+    searchStart = defsStr.cbegin();
+    while (std::regex_search(searchStart, defsStr.cend(), match, checkRegex)) {
+        Constraint c(Constraint::Type::CHECK, match[1]);
+        c.checkExpression = match[2];
+        constraints.push_back(c);
+        searchStart = match.suffix().first;
+    }
+    
+    // Extract NOT NULL constraints
+    searchStart = defsStr.cbegin();
+    while (std::regex_search(searchStart, defsStr.cend(), match, notNullRegex)) {
+        Constraint c(Constraint::Type::NOT_NULL, match[1]);
+        
+        // Split comma-separated column list
+        std::string colList = match[2];
+        std::istringstream colStream(colList);
+        std::string col;
+        while (std::getline(colStream, col, ',')) {
+            c.columns.push_back(trim(col));
+        }
+        
+        constraints.push_back(c);
+        searchStart = match.suffix().first;
+    }
+    
+    return constraints;
+}
+
+std::vector<std::pair<std::string, std::string>> Parser::extractWithClauses(const std::string& query) {
+    std::vector<std::pair<std::string, std::string>> clauses;
+    
+    // Find the WITH clause
+    size_t withPos = query.find("WITH");
+    if (withPos == std::string::npos) {
+        return clauses;
+    }
+    
+    // Extract the WITH clause part
+    size_t mainQueryPos = query.find(";", withPos);
+    if (mainQueryPos == std::string::npos) {
+        mainQueryPos = query.find("SELECT", withPos);
+        if (mainQueryPos == std::string::npos) {
+            return clauses;
+        }
+    }
+    
+    std::string withClauseStr = query.substr(withPos, mainQueryPos - withPos);
+    
+    // Split into individual CTEs
+    std::regex cteRegex(R"((\w+)\s*AS\s*\((.*?)\))");
+    std::string::const_iterator searchStart(withClauseStr.cbegin());
+    std::smatch match;
+    
+    while (std::regex_search(searchStart, withClauseStr.cend(), match, cteRegex)) {
+        std::string cteName = match[1];
+        std::string cteQuery = match[2];
+        clauses.emplace_back(cteName, cteQuery);
+        searchStart = match.suffix().first;
+    }
+    
+    return clauses;
+}
+
+Query Parser::parseCreateTable(const std::string& query) {
+    Query q;
+    q.type = "CREATE";
+    
+    // Extract table name
+    std::regex tableNameRegex(R"(CREATE\s+TABLE\s+(\w+))");
+    std::smatch match;
+    if (std::regex_search(query, match, tableNameRegex)) {
+        q.tableName = match[1];
+    }
+    
+    // Extract columns and constraints
+    q.columns = extractColumns(query);
+    q.constraints = extractConstraints(query);
+    
+    // Validate duplicate column names and data types
+    std::unordered_set<std::string> seen;
+    for (const auto &colPair : q.columns) {
+        if (seen.find(colPair.first) != seen.end()) {
+            throw DatabaseException("Duplicate column name '" + colPair.first + "' in CREATE TABLE statement");
+        }
+        seen.insert(colPair.first);
+        if (!isValidDataType(colPair.second) && !UserTypeRegistry::typeExists(colPair.second)) {
+            throw DataTypeException("Invalid data type '" + colPair.second + "' for column '" + colPair.first + "'");
+        }
+    }
+    
+    return q;
+}
+
+Query Parser::parseCreateIndex(const std::string& query) {
+    Query q;
+    q.type = "CREATEINDEX";
+    
+    // Extract index name
+    std::regex indexNameRegex(R"(CREATE\s+INDEX\s+(\w+))");
+    std::smatch match;
+    if (std::regex_search(query, match, indexNameRegex)) {
+        q.indexName = match[1];
+    }
+    
+    // Extract table name
+    std::regex tableNameRegex(R"(ON\s+(\w+))");
+    if (std::regex_search(query, match, tableNameRegex)) {
+        q.tableName = match[1];
+    }
+    
+    // Extract column name
+    std::regex columnNameRegex(R"(\(\s*(\w+)\s*\))");
+    if (std::regex_search(query, match, columnNameRegex)) {
+        q.columnName = match[1];
+    }
+    
+    return q;
+}
+
+Query Parser::parseCreateView(const std::string& query) {
+    Query q;
+    q.type = "CREATEVIEW";
+    
+    // Extract view name
+    std::regex viewNameRegex(R"(CREATE\s+VIEW\s+(\w+))");
+    std::smatch match;
+    if (std::regex_search(query, match, viewNameRegex)) {
+        q.viewName = match[1];
+    }
+    
+    // Extract view definition
+    std::regex viewDefRegex(R"(AS\s+(.*))");
+    if (std::regex_search(query, match, viewDefRegex)) {
+        q.viewDefinition = match[1];
+    }
+    
+    return q;
+}
+
+Query Parser::parseCreateType(const std::string& query) {
+    Query q;
+    q.type = "CREATETYPE";
+    
+    // Extract type name
+    std::regex typeNameRegex(R"(CREATE\s+TYPE\s+(\w+))");
+    std::smatch match;
+    if (std::regex_search(query, match, typeNameRegex)) {
+        q.typeName = match[1];
+    }
+    
+    // Extract type attributes (similar to table columns)
+    q.columns = extractColumns(query);
+    
+    return q;
+}
+
+Query Parser::parseCreateAssertion(const std::string& query) {
+    Query q;
+    q.type = "CREATEASSERTION";
+    
+    // Extract assertion name
+    std::regex assertionNameRegex(R"(CREATE\s+ASSERTION\s+(\w+))");
+    std::smatch match;
+    if (std::regex_search(query, match, assertionNameRegex)) {
+        q.assertionName = match[1];
+    }
+    
+    // Extract assertion condition
+    std::regex conditionRegex(R"(CHECK\s+\((.*)\))");
+    if (std::regex_search(query, match, conditionRegex)) {
+        q.assertionCondition = match[1];
+    }
+    
+    return q;
+}
+
+Query Parser::parseAlterTable(const std::string& query) {
+    Query q;
+    q.type = "ALTER";
+    
+    // Extract table name
+    std::regex tableNameRegex(R"(ALTER\s+TABLE\s+(\w+))");
+    std::smatch match;
+    if (std::regex_search(query, match, tableNameRegex)) {
+        q.tableName = match[1];
+    }
+    
+    // Extract alter action
+    if (query.find("ADD CONSTRAINT") != std::string::npos) {
+        q.alterAction = "ADD CONSTRAINT";
+        q.constraints = extractConstraints(query);
+    } else if (query.find("DROP CONSTRAINT") != std::string::npos) {
+        q.alterAction = "DROP CONSTRAINT";
+        
+        // Extract constraint name
+        std::regex constraintNameRegex(R"(DROP\s+CONSTRAINT\s+(\w+))");
+        if (std::regex_search(query, match, constraintNameRegex)) {
+            Constraint c(Constraint::Type::UNIQUE, match[1]);
+            q.constraints.push_back(c);
+        }
+    } else if (query.find("ADD") != std::string::npos) {
+        q.alterAction = "ADD";
+        
+        // Extract column definition
+        std::regex columnDefRegex(R"(ADD\s+(?:COLUMN\s+)?(\w+)\s+(\w+(?:\(\d+(?:,\d+)?\))?))");
+        if (std::regex_search(query, match, columnDefRegex)) {
+            q.alterColumn = {match[1], match[2]};
+        }
+    } else if (query.find("DROP") != std::string::npos) {
+        q.alterAction = "DROP";
+        
+        // Extract column name
+        std::regex columnNameRegex(R"(DROP\s+(?:COLUMN\s+)?(\w+))");
+        if (std::regex_search(query, match, columnNameRegex)) {
+            q.alterColumn = {match[1], ""};
+        }
+    } else if (query.find("RENAME") != std::string::npos) {
+        if (query.find("RENAME TO") != std::string::npos) {
+            q.alterAction = "RENAME";
+            
+            // Extract new table name
+            std::regex newTableNameRegex(R"(RENAME\s+TO\s+(\w+))");
+            if (std::regex_search(query, match, newTableNameRegex)) {
+                q.newTableName = match[1];
+            }
+        } else if (query.find("RENAME COLUMN") != std::string::npos) {
+            q.alterAction = "RENAME COLUMN";
+            
+            // Extract old and new column names
+            std::regex columnNamesRegex(R"(RENAME\s+COLUMN\s+(\w+)\s+TO\s+(\w+))");
+            if (std::regex_search(query, match, columnNamesRegex)) {
+                q.alterColumn = {match[1], match[2]};
+            }
+        }
+    }
+    
+    return q;
+}
+
+Query Parser::parseInsert(const std::string& query) {
+    Query q;
+    q.type = "INSERT";
+    
+    // Extract table name
+    std::regex tableNameRegex(R"(INSERT\s+INTO\s+(\w+))");
+    std::smatch match;
+    if (std::regex_search(query, match, tableNameRegex)) {
+        q.tableName = match[1];
+    }
+    
+    // Extract values
+    q.values = extractValues(query);
+    
+    return q;
+}
+
+Query Parser::parseSelect(const std::string& query) {
+    Query q;
+    q.type = "SELECT";
+    
+    // Check for DISTINCT or ALL
+    if (query.find("SELECT DISTINCT") != std::string::npos) {
+        q.distinct = true;
+    } else if (query.find("SELECT ALL") != std::string::npos) {
+        q.all = true;
+    }
+    
+    // Extract select columns
+    q.selectColumns = extractSelectColumns(query);
+    
+    // Extract FROM clause
+    std::regex fromRegex(R"(FROM\s+(\w+))");
+    std::smatch match;
+    if (std::regex_search(query, match, fromRegex)) {
+        q.tableName = match[1];
+    }
+    
+    // Check for JOIN
+    q.isJoin = false;
+    if (query.find(" JOIN ") != std::string::npos) {
+        q.isJoin = true;
+        
+        // Determine join type
+        if (query.find("INNER JOIN") != std::string::npos) {
+            q.joinType = "INNER";
+        } else if (query.find("LEFT JOIN") != std::string::npos || query.find("LEFT OUTER JOIN") != std::string::npos) {
+            q.joinType = "LEFT OUTER";
+        } else if (query.find("RIGHT JOIN") != std::string::npos || query.find("RIGHT OUTER JOIN") != std::string::npos) {
+            q.joinType = "RIGHT OUTER";
+        } else if (query.find("FULL JOIN") != std::string::npos || query.find("FULL OUTER JOIN") != std::string::npos) {
+            q.joinType = "FULL OUTER";
+        } else if (query.find("NATURAL JOIN") != std::string::npos) {
+            q.joinType = "NATURAL";
+        } else {
+            q.joinType = "INNER"; // Default
+        }
+        
+        // Extract join table
+        std::regex joinTableRegex;
+        if (q.joinType == "NATURAL") {
+            joinTableRegex = std::regex(R"(NATURAL\s+JOIN\s+(\w+))");
+        } else {
+            joinTableRegex = std::regex(R"(JOIN\s+(\w+))");
+        }
+        
+        if (std::regex_search(query, match, joinTableRegex)) {
+            q.joinTable = match[1];
+        }
+        
+        // Extract join condition (for non-NATURAL joins)
+        if (q.joinType != "NATURAL") {
+            if (query.find(" ON ") != std::string::npos) {
+                std::regex onRegex(R"(ON\s+(.*?)(?:\s+(?:WHERE|GROUP|ORDER|HAVING|LIMIT)|$))");
+                if (std::regex_search(query, match, onRegex)) {
+                    q.joinCondition = match[1];
+                }
+            } else if (query.find(" USING ") != std::string::npos) {
+                std::regex usingRegex(R"(USING\s+\((.*?)\))");
+                if (std::regex_search(query, match, usingRegex)) {
+                    std::string columns = match[1];
+                    std::istringstream colStream(columns);
+                    std::string col;
+                    while (std::getline(colStream, col, ',')) {
+                        q.usingColumns.push_back(trim(col));
+                    }
+                }
+            }
+        }
+    }
+    
+    // Extract WHERE clause
+    q.condition = extractCondition(query);
+    
+    // Extract GROUP BY clause
+    std::regex groupByRegex(R"(GROUP\s+BY\s+(.*?)(?:\s+(?:HAVING|ORDER|LIMIT)|$))");
+    if (std::regex_search(query, match, groupByRegex)) {
+        std::string groupByColumns = match[1];
+        std::istringstream groupByStream(groupByColumns);
+        std::string col;
+        while (std::getline(groupByStream, col, ',')) {
+            q.groupByColumns.push_back(trim(col));
+        }
+    }
+    
+    // Extract HAVING clause
+    std::regex havingRegex(R"(HAVING\s+(.*?)(?:\s+(?:ORDER|LIMIT)|$))");
+    if (std::regex_search(query, match, havingRegex)) {
+        q.havingCondition = match[1];
+    }
+    
+    // Extract ORDER BY clause
+    std::regex orderByRegex(R"(ORDER\s+BY\s+(.*?)(?:\s+LIMIT|$))");
+    if (std::regex_search(query, match, orderByRegex)) {
+        std::string orderByColumns = match[1];
+        std::istringstream orderByStream(orderByColumns);
+        std::string col;
+        while (std::getline(orderByStream, col, ',')) {
+            q.orderByColumns.push_back(trim(col));
+        }
+    }
+    
+    // Check for set operations
+    if (query.find(" UNION ") != std::string::npos) {
+        q.setOperation = "UNION";
+        auto parts = parseSetOperation(query);
+        q.rightQuery = parts.second;
+    } else if (query.find(" INTERSECT ") != std::string::npos) {
+        q.setOperation = "INTERSECT";
+        auto parts = parseSetOperation(query);
+        q.rightQuery = parts.second;
+    } else if (query.find(" EXCEPT ") != std::string::npos) {
+        q.setOperation = "EXCEPT";
+        auto parts = parseSetOperation(query);
+        q.rightQuery = parts.second;
+    }
+    
+    // Extract subqueries
+    q.subqueries = extractSubqueries(query);
+    
+    return q;
+}
+
+Query Parser::parseUpdate(const std::string& query) {
+    Query q;
+    q.type = "UPDATE";
+    
+    // Extract table name
+    std::regex tableNameRegex(R"(UPDATE\s+(\w+))");
+    std::smatch match;
+    if (std::regex_search(query, match, tableNameRegex)) {
+        q.tableName = match[1];
+    }
+    
+    // Extract SET updates
+    q.updates = extractUpdates(query);
+    
+    // Extract WHERE clause
+    q.condition = extractCondition(query);
+    
+    return q;
+}
+
+Query Parser::parseDelete(const std::string& query) {
+    Query q;
+    q.type = "DELETE";
+    
+    // Extract table name
+    std::regex tableNameRegex(R"(FROM\s+(\w+))");
+    std::smatch match;
+    if (std::regex_search(query, match, tableNameRegex)) {
+        q.tableName = match[1];
+    }
+    
+    // Extract WHERE clause
+    q.condition = extractCondition(query);
+    
+    return q;
+}
+
+Query Parser::parseGrant(const std::string& query) {
+    Query q;
+    q.type = "GRANT";
+    
+    // Extract privilege
+    std::regex privRegex(R"(GRANT\s+((?:SELECT|INSERT|UPDATE|DELETE|ALL)(?:\s*,\s*(?:SELECT|INSERT|UPDATE|DELETE|ALL))*))");
+    std::smatch match;
+    if (std::regex_search(query, match, privRegex)) {
+        q.privilege = match[1];
+    }
+    
+    // Extract table name
+    std::regex tableNameRegex(R"(ON\s+(\w+))");
+    if (std::regex_search(query, match, tableNameRegex)) {
+        q.tableName = match[1];
+    }
+    
+    // Extract username
+    std::regex userNameRegex(R"(TO\s+(\w+))");
+    if (std::regex_search(query, match, userNameRegex)) {
+        q.username = match[1];
+    }
+    
+    return q;
+}
+
+Query Parser::parseRevoke(const std::string& query) {
+    Query q;
+    q.type = "REVOKE";
+    
+    // Extract privilege
+    std::regex privRegex(R"(REVOKE\s+((?:SELECT|INSERT|UPDATE|DELETE|ALL)(?:\s*,\s*(?:SELECT|INSERT|UPDATE|DELETE|ALL))*))");
+    std::smatch match;
+    if (std::regex_search(query, match, privRegex)) {
+        q.privilege = match[1];
+    }
+    
+    // Extract table name
+    std::regex tableNameRegex(R"(ON\s+(\w+))");
+    if (std::regex_search(query, match, tableNameRegex)) {
+        q.tableName = match[1];
+    }
+    
+    // Extract username
+    std::regex userNameRegex(R"(FROM\s+(\w+))");
+    if (std::regex_search(query, match, userNameRegex)) {
+        q.username = match[1];
+    }
+    
+    return q;
+}
+
+
+
+std::vector<std::string> Parser::extractSelectColumns(const std::string& query) {
+    std::vector<std::string> columns;
+    
+    // Find the SELECT clause
+    size_t selectPos = query.find("SELECT");
+    if (selectPos == std::string::npos) {
+        return columns;
+    }
+    
+    // Extract the columns part
+    size_t fromPos = query.find("FROM", selectPos);
+    if (fromPos == std::string::npos) {
+        return columns;
+    }
+    
+    std::string colsStr = query.substr(selectPos + 6, fromPos - selectPos - 6);
+    colsStr = trim(colsStr);
+    
+    // Check for DISTINCT or ALL
+    if (colsStr.find("DISTINCT") != std::string::npos) {
+        colsStr = colsStr.substr(8);
+    } else if (colsStr.find("ALL") != std::string::npos) {
+        colsStr = colsStr.substr(3);
+    }
+    
+    // Split comma-separated columns
+    std::istringstream colStream(colsStr);
+    std::string col;
+    while (std::getline(colStream, col, ',')) {
+        columns.push_back(trim(col));
+    }
+    
+    return columns;
+}
+
+std::string Parser::extractCondition(const std::string& query) {
+    std::string condition;
+    
+    // Check for WHERE clause
+    size_t wherePos = query.find("WHERE");
+    if (wherePos != std::string::npos) {
+        size_t endPos = query.find_first_of(";", wherePos);
+        if (endPos == std::string::npos) {
+            endPos = query.length();
+        }
+        
+        condition = query.substr(wherePos + 5, endPos - wherePos - 5);
+        condition = trim(condition);
+    }
+    
+    return condition;
 }
 
 std::vector<std::pair<std::string, std::string>> Parser::extractUpdates(const std::string& query) {
     std::vector<std::pair<std::string, std::string>> updates;
-    size_t pos = toUpperCase(query).find("SET");
-    if (pos == std::string::npos)
+    
+    // Find the SET clause
+    size_t setPos = query.find("SET");
+    if (setPos == std::string::npos) {
         return updates;
-    pos += 3;
-    size_t endPos = toUpperCase(query).find("WHERE", pos);
-    std::string updatesStr = (endPos == std::string::npos) ? query.substr(pos) : query.substr(pos, endPos - pos);
-    std::istringstream iss(updatesStr);
-    std::string update;
-    while (std::getline(iss, update, ',')) {
-        size_t eq = update.find('=');
-        if (eq == std::string::npos) continue;
-        std::string col = trim(update.substr(0, eq));
-        std::string val = trim(update.substr(eq + 1));
-        if (!val.empty() && val.front() == '\'' && val.back() == '\'' && val.size() > 1)
-            val = val.substr(1, val.size() - 2);
-        updates.emplace_back(col, val);
     }
+    
+    // Extract the updates part
+    size_t wherePos = query.find("WHERE", setPos);
+    if (wherePos == std::string::npos) {
+        wherePos = query.find(";", setPos);
+    }
+    
+    std::string updatesStr = query.substr(setPos + 3, wherePos - setPos - 3);
+    updatesStr = trim(updatesStr);
+    
+    // Split into individual assignments
+    std::istringstream updateStream(updatesStr);
+    std::string assignment;
+    while (std::getline(updateStream, assignment, ',')) {
+        assignment = trim(assignment);
+        size_t eqPos = assignment.find('=');
+        if (eqPos != std::string::npos) {
+            std::string col = trim(assignment.substr(0, eqPos));
+            std::string val = trim(assignment.substr(eqPos + 1));
+            updates.emplace_back(col, val);
+        }
+    }
+    
     return updates;
 }
 
-std::vector<std::string> Parser::extractSelectColumns(const std::string& query) {
-    std::vector<std::string> cols;
-    size_t start = toUpperCase(query).find("SELECT");
-    if (start == std::string::npos) return cols;
-    start += 6;
-    size_t end = toUpperCase(query).find("FROM", start);
-    if (end == std::string::npos) return cols;
-    std::string colsStr = query.substr(start, end - start);
-    std::istringstream iss(colsStr);
-    std::string col;
-    while (std::getline(iss, col, ',')) {
-        cols.push_back(trim(col));
+std::pair<std::string, std::string> Parser::parseJoinCondition(const std::string& query) {
+    std::pair<std::string, std::string> condition;
+    
+    // Find the ON clause
+    size_t onPos = query.find("ON");
+    if (onPos != std::string::npos) {
+        size_t endPos = query.find_first_of(";", onPos);
+        if (endPos == std::string::npos) {
+            endPos = query.length();
+        }
+        
+        condition.first = "ON";
+        condition.second = query.substr(onPos + 2, endPos - onPos - 2);
+        condition.second = trim(condition.second);
     }
-    return cols;
+    
+    return condition;
 }
 
-std::string Parser::extractCondition(const std::string& query) {
-    size_t pos = toUpperCase(query).find("WHERE");
-    if (pos == std::string::npos)
-        return "";
-    size_t endPos = std::string::npos;
-    size_t orderPos = toUpperCase(query).find("ORDER BY", pos);
-    size_t groupPos = toUpperCase(query).find("GROUP BY", pos);
-    size_t havingPos = toUpperCase(query).find("HAVING", pos);
-    if (orderPos != std::string::npos)
-        endPos = orderPos;
-    if (groupPos != std::string::npos && (endPos == std::string::npos || groupPos < endPos))
-        endPos = groupPos;
-    if (havingPos != std::string::npos && (endPos == std::string::npos || havingPos < endPos))
-        endPos = havingPos;
-    if (endPos == std::string::npos)
-        return trim(query.substr(pos + 5));
-    return trim(query.substr(pos + 5, endPos - pos - 5));
+std::vector<std::pair<std::string, std::string>> Parser::parseWithClause(const std::string& query) {
+    return extractWithClauses(query);
+}
+
+std::pair<std::string, std::string> Parser::parseSetOperation(const std::string& query) {
+    std::pair<std::string, std::string> parts;
+    
+    // Find the set operation (UNION, INTERSECT, EXCEPT)
+    size_t opPos = query.find(" UNION ");
+    if (opPos == std::string::npos) {
+        opPos = query.find(" INTERSECT ");
+        if (opPos == std::string::npos) {
+            opPos = query.find(" EXCEPT ");
+        }
+    }
+    
+    if (opPos != std::string::npos) {
+        parts.first = query.substr(0, opPos);
+        parts.second = query.substr(opPos + 6); // Skip the operator (assuming 5 characters for EXCEPT)
+    }
+    
+    return parts;
+}
+
+std::vector<std::string> Parser::extractSubqueries(const std::string& query) {
+    std::vector<std::string> subqueries;
+    
+    // Find all subqueries in parentheses
+    std::regex subqueryRegex(R"\(([^()]*)\)");
+    std::string::const_iterator searchStart(query.cbegin());
+    std::smatch match;
+    
+    while (std::regex_search(searchStart, query.cend(), match, subqueryRegex)) {
+        subqueries.push_back(match[1]);
+        searchStart = match.suffix().first;
+    }
+    
+    return subqueries;
 }

@@ -8,17 +8,34 @@
 
 // Create table
 void Database::createTable(const std::string& tableName,
-    const std::vector<std::pair<std::string, std::string>>& cols) {
+    const std::vector<std::pair<std::string, std::string>>& cols,
+    const std::vector<Constraint>& constraints) {
+    std::unique_lock<std::mutex> lock(databaseMutex);
+    
     std::string lowerName = toLowerCase(tableName);
     if (tables.find(lowerName) != tables.end()) {
-        std::cout << "Error: Table " << tableName << " already exists." << std::endl;
-        return;
+        throw DatabaseException("Table '" + tableName + "' already exists");
     }
-    Table table;
+    
+    // Create the table using make_unique
+    auto table = std::make_unique<Table>(tableName);
+    
+    // Add columns
     for (const auto& col : cols) {
-        table.addColumn(col.first, col.second);
+        table->addColumn(col.first, col.second);
     }
-    tables[lowerName] = table;
+    
+    // Add constraints
+    for (const auto& constraint : constraints) {
+        try {
+            validateReferences(constraint);
+            table->addConstraint(constraint);
+        } catch (const DatabaseException& e) {
+            throw DatabaseException("Failed to create table '" + tableName + "': " + e.what());
+        }
+    }
+    
+    tables[lowerName] = std::move(table);
     std::cout << "Table " << tableName << " created." << std::endl;
 }
 
@@ -30,13 +47,13 @@ void Database::dropTable(const std::string& tableName) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
 }
 
-void Database::alterTableAddColumn(const std::string& tableName, const std::pair<std::string, std::string>& column) {
+void Database::alterTableAddColumn(const std::string& tableName, const std::pair<std::string, std::string>& column, bool isNotNull) {
     std::string lowerName = toLowerCase(tableName);
     if (tables.find(lowerName) == tables.end()) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
         return;
     }
-    tables[lowerName].addColumn(column.first, column.second);
+    tables[lowerName]->addColumn(column.first, column.second);
     std::cout << "Column " << column.first << " added to " << tableName << "." << std::endl;
 }
 
@@ -46,7 +63,7 @@ void Database::alterTableDropColumn(const std::string& tableName, const std::str
         std::cout << "Table " << tableName << " does not exist." << std::endl;
         return;
     }
-    bool success = tables[lowerName].dropColumn(columnName);
+    bool success = tables[lowerName]->dropColumn(columnName);
     if (success)
         std::cout << "Column " << columnName << " dropped from " << tableName << "." << std::endl;
     else
@@ -60,7 +77,7 @@ void Database::describeTable(const std::string& tableName) {
         return;
     }
     std::cout << "Schema for " << tableName << ":" << std::endl;
-    const auto& cols = tables[lowerName].getColumns();
+    const auto& cols = tables[lowerName]->getColumns();
     for (const auto& col : cols)
         std::cout << col << "\t";
     std::cout << std::endl;
@@ -74,27 +91,27 @@ void Database::insertRecord(const std::string& tableName,
         return;
     }
     for (const auto& valueSet : values) {
-        tables[lowerName].addRow(valueSet);
+        tables[lowerName]->addRow(valueSet);
     }
     std::cout << "Record(s) inserted into " << tableName << "." << std::endl;
 }
 
 void Database::selectRecords(const std::string& tableName,
-                             const std::vector<std::string>& selectColumns,
-                             const std::string& condition,
-                             const std::vector<std::string>& orderByColumns,
-                             const std::vector<std::string>& groupByColumns,
-                             const std::string& havingCondition,
-                             bool isJoin,
-                             const std::string& joinTable,
-                             const std::string& joinCondition) {
+                                const std::vector<std::string>& selectColumns,
+                                const std::string& condition,
+                                const std::vector<std::string>& orderByColumns,
+                                const std::vector<std::string>& groupByColumns,
+                                const std::string& havingCondition,
+                                bool isJoin,
+                                const std::string& joinTable,
+                                const std::string& joinCondition) {
     if (!isJoin) {
         std::string lowerName = toLowerCase(tableName);
         if (tables.find(lowerName) == tables.end()) {
             std::cout << "Table " << tableName << " does not exist." << std::endl;
             return;
         }
-        tables[lowerName].selectRows(selectColumns, condition, orderByColumns, groupByColumns, havingCondition);
+        tables[lowerName]->selectRows(selectColumns, condition, orderByColumns, groupByColumns, havingCondition);
     } else {
         // JOIN implementation (nested-loop inner join)
         std::string leftName = toLowerCase(tableName);
@@ -185,7 +202,7 @@ void Database::deleteRecords(const std::string& tableName, const std::string& co
         std::cout << "Table " << tableName << " does not exist." << std::endl;
         return;
     }
-    tables[lowerName].deleteRows(condition);
+    tables[lowerName]->deleteRows(condition);
     std::cout << "Records deleted from " << tableName << "." << std::endl;
 }
 
@@ -197,7 +214,7 @@ void Database::updateRecords(const std::string& tableName,
         std::cout << "Table " << tableName << " does not exist." << std::endl;
         return;
     }
-    tables[lowerName].updateRows(updates, condition);
+    tables[lowerName]->updateRows(updates, condition);
     std::cout << "Records updated in " << tableName << "." << std::endl;
 }
 
@@ -247,7 +264,7 @@ void Database::truncateTable(const std::string& tableName) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
         return;
     }
-    tables[lowerName].clearRows();
+    tables[lowerName]->clearRows();
     std::cout << "Table " << tableName << " truncated." << std::endl;
 }
 
@@ -258,7 +275,7 @@ void Database::renameTable(const std::string& oldName, const std::string& newNam
         std::cout << "Table " << oldName << " does not exist." << std::endl;
         return;
     }
-    tables[lowerNew] = tables[lowerOld];
+    tables[lowerNew] = std::move(tables[lowerOld]);
     tables.erase(lowerOld);
     std::cout << "Table " << oldName << " renamed to " << newName << "." << std::endl;
 }
@@ -450,7 +467,6 @@ void Database::mergeRecords(const std::string& tableName, const std::string& mer
     std::cout << "MERGE command executed on " << tableName << "." << std::endl;
 }
 
-
 void Database::replaceInto(const std::string& tableName, const std::vector<std::vector<std::string>>& values) {
     std::string lowerName = toLowerCase(tableName);
     if (tables.find(lowerName) == tables.end()) {
@@ -459,7 +475,7 @@ void Database::replaceInto(const std::string& tableName, const std::vector<std::
     }
     for (const auto& row : values) {
         bool replaced = false;
-        for (auto& existingRow : tables[lowerName].getRowsNonConst()) {
+        for (auto& existingRow : tables[lowerName]->getRowsNonConst()) {
             if (!existingRow.empty() && !row.empty() && existingRow[0] == row[0]) {
                 existingRow = row;
                 replaced = true;
@@ -467,7 +483,7 @@ void Database::replaceInto(const std::string& tableName, const std::vector<std::
             }
         }
         if (!replaced) {
-            tables[lowerName].addRow(row);
+            tables[lowerName]->addRow(row);
         }
     }
     std::cout << "REPLACE INTO executed on " << tableName << "." << std::endl;
@@ -479,7 +495,7 @@ void Database::sortPhotos(const std::string& tableName, const std::string& colum
         std::cout << "Table " << tableName << " does not exist." << std::endl;
         return;
     }
-    tables[lowerName].sortRows(column, ascending);
+    tables[lowerName]->sortRows(column, ascending);
     std::cout << "Photos sorted in " << tableName << "." << std::endl;
 }
 
@@ -495,3 +511,5 @@ void Database::showRecentPhotos() {
         recentPhotos.pop();
     }
 }
+
+// Other methods remain unchanged

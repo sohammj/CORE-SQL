@@ -5,8 +5,6 @@
 #include <vector>
 #include <memory>
 
-// Abstract expression for evaluating conditions against a row.
-// 'row' is the vector of values and 'columns' is the header list.
 class ConditionExpression {
 public:
     virtual ~ConditionExpression() = default;
@@ -20,18 +18,25 @@ class ConditionParser {
 public:
     ConditionParser(const std::string& condition);
     ConditionExprPtr parse();
+
 private:
     std::vector<std::string> tokens;
     size_t current;
+
     void tokenize(const std::string& condition);
     std::string peek() const;
     std::string getNext();
     bool matchCondition(const std::string& token);
+
     // Recursive descent parsing functions
     ConditionExprPtr parseExpression();
     ConditionExprPtr parseTerm();
     ConditionExprPtr parseFactor();
     ConditionExprPtr parseComparison();
+    void processSpecialTokens();
+    bool matchToken(const std::string& token);
+    ConditionExprPtr parsePredicate();
+    ConditionExprPtr parseSimpleValue();
 };
 
 #endif // CONDITIONPARSER_H
