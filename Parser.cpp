@@ -176,7 +176,7 @@ std::vector<std::pair<std::string, std::string>> Parser::extractColumns(const st
     
     // Find column definitions between parentheses
     size_t start = query.find('(');
-    size_t end = query.find_last_of(')');
+    size_t end = query.rfind(')');
     
     if (start == std::string::npos || end == std::string::npos) {
         return cols;
@@ -184,53 +184,95 @@ std::vector<std::pair<std::string, std::string>> Parser::extractColumns(const st
     
     std::string colsStr = query.substr(start + 1, end - start - 1);
     
-    // Handle multi-line, comma-separated definitions
-    std::istringstream colStream(colsStr);
-    std::string line;
+    // Split columns by commas, but handle nested parentheses
+    std::vector<std::string> columnDefs;
+    int parenDepth = 0;
     std::string currentDef;
-    int parenLevel = 0;
     
-    while (std::getline(colStream, line)) {
-        // Count parentheses to handle nested definitions
-        for (char c : line) {
-            if (c == '(') parenLevel++;
-            else if (c == ')') parenLevel--;
-        }
+    for (size_t i = 0; i < colsStr.length(); i++) {
+        char c = colsStr[i];
         
-        if (!currentDef.empty()) {
-            currentDef += " ";
-        }
-        currentDef += line;
-        
-        // If balanced parentheses and ends with comma, or last line
-        if ((parenLevel == 0 && !currentDef.empty() && currentDef.back() == ',') ||
-            colStream.eof()) {
-            
-            // Remove trailing comma if present
-            if (!currentDef.empty() && currentDef.back() == ',') {
-                currentDef.pop_back();
-            }
-            
-            // Extract column name and type
-            std::istringstream defStream(currentDef);
-            std::string colName, colType;
-            defStream >> colName >> colType;
-            
-            // Handle longer type declarations like CHAR(255)
-            if (colType.find('(') != std::string::npos && colType.find(')') == std::string::npos) {
-                std::string remainder;
-                defStream >> remainder;
-                colType += " " + remainder;
-            }
-            
-            cols.emplace_back(trim(colName), trim(colType));
+        if (c == '(') {
+            parenDepth++;
+            currentDef += c;
+        } else if (c == ')') {
+            parenDepth--;
+            currentDef += c;
+        } else if (c == ',' && parenDepth == 0) {
+            // Found a column separator
+            columnDefs.push_back(trim(currentDef));
             currentDef.clear();
+        } else {
+            currentDef += c;
         }
+    }
+    
+    // Add the last column
+    if (!currentDef.empty()) {
+        columnDefs.push_back(trim(currentDef));
+    }
+    
+    // Process each column definition
+    for (const auto& def : columnDefs) {
+        std::string trimmedDef = trim(def);
+        
+        // Skip if it's a constraint definition
+        if (toUpperCase(trimmedDef).find("CONSTRAINT") == 0 ||
+            toUpperCase(trimmedDef).find("PRIMARY KEY") == 0 ||
+            toUpperCase(trimmedDef).find("FOREIGN KEY") == 0 ||
+            toUpperCase(trimmedDef).find("UNIQUE") == 0 ||
+            toUpperCase(trimmedDef).find("CHECK") == 0) {
+            continue;
+        }
+        
+        // Extract column name and type
+        std::istringstream iss(trimmedDef);
+        std::string colName, colType, word;
+        
+        // Get the column name (first word)
+        iss >> colName;
+        
+        // Get the column type (next word, might include modifiers like NOT NULL)
+        std::string typeWithModifiers;
+        iss >> typeWithModifiers;
+        
+        // Handle data types with parameters like VARCHAR(50)
+        if (typeWithModifiers.find('(') != std::string::npos && 
+            typeWithModifiers.find(')') == std::string::npos) {
+            // Type has opening parenthesis but no closing one
+            // Read until we find the closing parenthesis
+            std::string nextWord;
+            while (iss >> nextWord) {
+                typeWithModifiers += " " + nextWord;
+                if (nextWord.find(')') != std::string::npos) {
+                    break;
+                }
+            }
+        }
+        
+        // Find where the data type ends
+        size_t notPos = toUpperCase(typeWithModifiers).find(" NOT");
+        size_t primaryPos = toUpperCase(typeWithModifiers).find(" PRIMARY");
+        size_t uniquePos = toUpperCase(typeWithModifiers).find(" UNIQUE");
+        
+        size_t modifierPos = std::min({
+            notPos, primaryPos, uniquePos,
+            (notPos == std::string::npos ? std::string::npos : notPos),
+            (primaryPos == std::string::npos ? std::string::npos : primaryPos),
+            (uniquePos == std::string::npos ? std::string::npos : uniquePos)
+        });
+        
+        // Extract just the data type part
+        colType = typeWithModifiers;
+        if (modifierPos != std::string::npos) {
+            colType = typeWithModifiers.substr(0, modifierPos);
+        }
+        
+        cols.emplace_back(trim(colName), trim(colType));
     }
     
     return cols;
 }
-
 std::vector<Constraint> Parser::extractConstraints(const std::string& query) {
     std::vector<Constraint> constraints;
     

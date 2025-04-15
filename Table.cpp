@@ -15,8 +15,10 @@
 Table::Table(const std::string& name) : 
     tableName(name), 
     nextRowId(1) 
-{
-}
+    {
+        std::cout << "Debug: Table constructor called for " << name << std::endl;
+        std::cout << std::flush;
+    }
 
 // Set Operations
 // --------------
@@ -108,7 +110,7 @@ int Table::getRowCount() const {
 }
 
 bool Table::hasColumn(const std::string& columnName) const {
-    std::shared_lock<std::shared_mutex> lock(mutex);
+    std::cout << "Debug: Checking if column '" << columnName << "' exists" << std::endl;
     return std::find(columns.begin(), columns.end(), columnName) != columns.end();
 }
 
@@ -511,7 +513,13 @@ void Table::clearRows() {
 // -------------------
 
 void Table::addColumn(const std::string& columnName, const std::string& type, bool isNotNull) {
+    std::cout << "Debug: Adding column " << columnName << " of type " << type << std::endl;
+    std::cout << std::flush;
+    
     std::unique_lock<std::shared_mutex> lock(mutex);
+    std::cout << "Debug: Acquired column mutex lock" << std::endl;
+    std::cout << std::flush;
+    
     
     if (hasColumn(columnName)) {
         throw DatabaseException("Column '" + columnName + "' already exists");

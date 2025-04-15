@@ -12,73 +12,105 @@
 void Database::createTable(const std::string& tableName,
     const std::vector<std::pair<std::string, std::string>>& cols,
     const std::vector<Constraint>& constraints) {
+    
+    std::cout << "Debug: Starting creation of table " << tableName << " with " << cols.size() << " columns" << std::endl;
+    std::cout << std::flush;
+    
     std::unique_lock<std::mutex> lock(databaseMutex);
+    std::cout << "Debug: Acquired mutex lock" << std::endl;
+    std::cout << std::flush;
     
     std::string lowerName = toLowerCase(tableName);
     if (tables.find(lowerName) != tables.end()) {
         throw DatabaseException("Table '" + tableName + "' already exists");
     }
     
+    std::cout << "Debug: Table name check passed" << std::endl;
+    std::cout << std::flush;
+    
     // Create the table using make_unique
     auto table = std::make_unique<Table>(tableName);
+    
+    std::cout << "Debug: Table object created" << std::endl;
+    std::cout << std::flush;
     
     // Add columns
     for (const auto& col : cols) {
         table->addColumn(col.first, col.second);
+        std::cout << "Debug: Added column " << col.first << std::endl;
+        std::cout << std::flush;
     }
     
     // Add constraints
     for (const auto& constraint : constraints) {
         try {
+            std::cout << "Debug: Validating constraint" << std::endl;
+            std::cout << std::flush;
             validateReferences(constraint);
+            std::cout << "Debug: Adding constraint to table" << std::endl;
+            std::cout << std::flush;
             table->addConstraint(constraint);
         } catch (const DatabaseException& e) {
+            std::cout << "Debug: Constraint error: " << e.what() << std::endl;
+            std::cout << std::flush;
             throw DatabaseException("Failed to create table '" + tableName + "': " + e.what());
         }
     }
     
+    std::cout << "Debug: Adding table to collection" << std::endl;
+    std::cout << std::flush;
     tables[lowerName] = std::move(table);
     std::cout << "Table " << tableName << " created." << std::endl;
+    std::cout << std::flush;
 }
 
 void Database::dropTable(const std::string& tableName) {
     std::string lowerName = toLowerCase(tableName);
-    if (tables.erase(lowerName))
+    if (tables.erase(lowerName)){
         std::cout << "Table " << tableName << " dropped." << std::endl;
-    else
+        std::cout << std::flush;}
+    else{
         std::cout << "Table " << tableName << " does not exist." << std::endl;
+        std::cout << std::flush;}
 }
 
 void Database::alterTableAddColumn(const std::string& tableName, const std::pair<std::string, std::string>& column, bool isNotNull) {
     std::string lowerName = toLowerCase(tableName);
     if (tables.find(lowerName) == tables.end()) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
+        std::cout << std::flush;
         return;
     }
     tables[lowerName]->addColumn(column.first, column.second);
     std::cout << "Column " << column.first << " added to " << tableName << "." << std::endl;
+    std::cout << std::flush;
 }
 
 void Database::alterTableDropColumn(const std::string& tableName, const std::string& columnName) {
     std::string lowerName = toLowerCase(tableName);
     if (tables.find(lowerName) == tables.end()) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
+        std::cout << std::flush;
         return;
     }
     bool success = tables[lowerName]->dropColumn(columnName);
-    if (success)
+    if (success){
         std::cout << "Column " << columnName << " dropped from " << tableName << "." << std::endl;
-    else
+        std::cout << std::flush;}
+    else{
         std::cout << "Column " << columnName << " does not exist in " << tableName << "." << std::endl;
+        std::cout << std::flush;}
 }
 
 void Database::describeTable(const std::string& tableName) {
     std::string lowerName = toLowerCase(tableName);
     if (tables.find(lowerName) == tables.end()) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
+        std::cout << std::flush;
         return;
     }
     std::cout << "Schema for " << tableName << ":" << std::endl;
+    std::cout << std::flush;
     const auto& cols = tables[lowerName]->getColumns();
     for (const auto& col : cols)
         std::cout << col << "\t";
@@ -90,12 +122,14 @@ void Database::insertRecord(const std::string& tableName,
     std::string lowerName = toLowerCase(tableName);
     if (tables.find(lowerName) == tables.end()) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
+        std::cout << std::flush;
         return;
     }
     for (const auto& valueSet : values) {
         tables[lowerName]->addRow(valueSet);
     }
     std::cout << "Record(s) inserted into " << tableName << "." << std::endl;
+    std::cout << std::flush;
 }
 
 void Database::selectRecords(const std::string& tableName,
@@ -111,6 +145,7 @@ void Database::selectRecords(const std::string& tableName,
         std::string lowerName = toLowerCase(tableName);
         if (tables.find(lowerName) == tables.end()) {
             std::cout << "Table " << tableName << " does not exist." << std::endl;
+            std::cout << std::flush;
             return;
         }
         tables[lowerName]->selectRows(selectColumns, condition, orderByColumns, groupByColumns, havingCondition);
@@ -120,11 +155,13 @@ void Database::selectRecords(const std::string& tableName,
         std::string rightName = toLowerCase(joinTable);
         if (tables.find(leftName) == tables.end() || tables.find(rightName) == tables.end()) {
             std::cout << "One or both tables in JOIN do not exist." << std::endl;
+            std::cout << std::flush;
             return;
         }
         size_t eqPos = joinCondition.find('=');
         if (eqPos == std::string::npos) {
             std::cout << "Invalid join condition." << std::endl;
+            std::cout << std::flush;
             return;
         }
         std::string leftJoin = trim(joinCondition.substr(0, eqPos));
@@ -144,6 +181,7 @@ void Database::selectRecords(const std::string& tableName,
         auto rit = std::find(rightCols.begin(), rightCols.end(), rightJoin);
         if (lit == leftCols.end() || rit == rightCols.end()) {
             std::cout << "Join columns not found." << std::endl;
+            std::cout << std::flush;
             return;
         }
         int leftIdx = std::distance(leftCols.begin(), lit);
@@ -202,10 +240,12 @@ void Database::deleteRecords(const std::string& tableName, const std::string& co
     std::string lowerName = toLowerCase(tableName);
     if (tables.find(lowerName) == tables.end()) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
+        std::cout << std::flush;
         return;
     }
     tables[lowerName]->deleteRows(condition);
     std::cout << "Records deleted from " << tableName << "." << std::endl;
+    std::cout << std::flush;
 }
 
 void Database::updateRecords(const std::string& tableName,
@@ -214,14 +254,17 @@ void Database::updateRecords(const std::string& tableName,
     std::string lowerName = toLowerCase(tableName);
     if (tables.find(lowerName) == tables.end()) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
+        std::cout << std::flush;
         return;
     }
     tables[lowerName]->updateRows(updates, condition);
     std::cout << "Records updated in " << tableName << "." << std::endl;
+    std::cout << std::flush;
 }
 
 void Database::showTables() {
     std::cout << "Available Tables:" << std::endl;
+    std::cout << std::flush;
     for (const auto& pair : tables)
         std::cout << pair.first << std::endl;
 }
@@ -241,10 +284,12 @@ Transaction* Database::beginTransaction() {
         }
         inTransaction = true;
         std::cout << "Transaction started." << std::endl;
+        std::cout << std::flush;
         return new Transaction(this);
     }  // Pass 'this' as the database pointer
     else {
         std::cout << "Transaction already in progress." << std::endl;
+        std::cout << std::flush;
         return nullptr;
     }
 }
@@ -252,23 +297,27 @@ Transaction* Database::beginTransaction() {
 Transaction* Database::commitTransaction() {
     if (!inTransaction) {
        std::cout << "No active transaction to commit." << std::endl;
+       std::cout << std::flush;
        return nullptr;
     }
     inTransaction = false;
     backupTables.clear();
     std::cout << "Transaction committed." << std::endl;
+    std::cout << std::flush;
     return nullptr;
 }
 
 Transaction* Database::rollbackTransaction() {
     if (!inTransaction) {
        std::cout << "No active transaction to rollback." << std::endl;
+       std::cout << std::flush;
        return nullptr;
     }
     tables = std::move(backupTables);
     backupTables.clear();
     inTransaction = false;
     std::cout << "Transaction rolled back." << std::endl;
+    std::cout << std::flush;
     return nullptr;
 }
 
@@ -278,10 +327,12 @@ void Database::truncateTable(const std::string& tableName) {
     std::string lowerName = toLowerCase(tableName);
     if (tables.find(lowerName) == tables.end()) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
+        std::cout << std::flush;
         return;
     }
     tables[lowerName]->clearRows();
     std::cout << "Table " << tableName << " truncated." << std::endl;
+    std::cout << std::flush;
 }
 
 void Database::renameTable(const std::string& oldName, const std::string& newName) {
@@ -289,29 +340,35 @@ void Database::renameTable(const std::string& oldName, const std::string& newNam
     std::string lowerNew = toLowerCase(newName);
     if (tables.find(lowerOld) == tables.end()) {
         std::cout << "Table " << oldName << " does not exist." << std::endl;
+        std::cout << std::flush;
         return;
     }
     tables[lowerNew] = std::move(tables[lowerOld]);
     tables.erase(lowerOld);
     std::cout << "Table " << oldName << " renamed to " << newName << "." << std::endl;
+    std::cout << std::flush;
 }
 
 void Database::createIndex(const std::string& indexName, const std::string& tableName, const std::string& columnName) {
     std::string lowerTable = toLowerCase(tableName);
     if (tables.find(lowerTable) == tables.end()) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
+        std::cout << std::flush;
         return;
     }
     indexes[toLowerCase(indexName)] = {lowerTable, columnName};
     std::cout << "Index " << indexName << " created on " << tableName << "(" << columnName << ")." << std::endl;
+    std::cout << std::flush;
 }
 
 void Database::dropIndex(const std::string& indexName) {
     std::string lowerIndex = toLowerCase(indexName);
-    if (indexes.erase(lowerIndex))
+    if (indexes.erase(lowerIndex)){
         std::cout << "Index " << indexName << " dropped." << std::endl;
-    else
+        std::cout << std::flush;}
+    else{
         std::cout << "Index " << indexName << " does not exist." << std::endl;
+        std::cout << std::flush;}
 }
 
 void Database::mergeRecords(const std::string& tableName, const std::string& mergeCommand) {
@@ -330,6 +387,7 @@ void Database::mergeRecords(const std::string& tableName, const std::string& mer
     if (usingPos == std::string::npos || onPos == std::string::npos ||
         whenMatchedPos == std::string::npos || whenNotMatchedPos == std::string::npos) {
         std::cout << "MERGE: Invalid MERGE syntax." << std::endl;
+        std::cout << std::flush;
         return;
     }
     
@@ -338,6 +396,7 @@ void Database::mergeRecords(const std::string& tableName, const std::string& mer
     size_t sourceEnd = mergeCommand.find(")", sourceStart);
     if (sourceStart == std::string::npos || sourceEnd == std::string::npos) {
         std::cout << "MERGE: Invalid source subquery syntax." << std::endl;
+        std::cout << std::flush;
         return;
     }
     std::string sourceSubquery = mergeCommand.substr(sourceStart + 1, sourceEnd - sourceStart - 1);
@@ -345,6 +404,7 @@ void Database::mergeRecords(const std::string& tableName, const std::string& mer
     size_t selectPos = toUpperCase(sourceSubquery).find("SELECT");
     if (selectPos == std::string::npos) {
         std::cout << "MERGE: Source subquery must start with SELECT." << std::endl;
+        std::cout << std::flush;
         return;
     }
     std::string selectExpressions = sourceSubquery.substr(selectPos + 6);
@@ -373,6 +433,7 @@ void Database::mergeRecords(const std::string& tableName, const std::string& mer
     size_t eqPos = onClause.find('=');
     if (eqPos == std::string::npos) {
         std::cout << "MERGE: Invalid ON clause." << std::endl;
+        std::cout << std::flush;
         return;
     }
     std::string targetExpr = trim(onClause.substr(0, eqPos));
@@ -384,6 +445,7 @@ void Database::mergeRecords(const std::string& tableName, const std::string& mer
     
     // --- Step 4: Parse the UPDATE clause (WHEN MATCHED) ---
     size_t updateClauseStart = whenMatchedPos + std::string("WHEN MATCHED THEN UPDATE SET").length();
+    std::cout << std::flush;
     std::string updateClause = mergeCommand.substr(updateClauseStart, whenNotMatchedPos - updateClauseStart);
     updateClause = trim(updateClause);
     // Split assignments by commas.
@@ -412,6 +474,7 @@ void Database::mergeRecords(const std::string& tableName, const std::string& mer
     
     // --- Step 5: Parse the INSERT clause (WHEN NOT MATCHED) ---
     size_t insertClauseStart = whenNotMatchedPos + std::string("WHEN NOT MATCHED THEN INSERT VALUES").length();
+    std::cout << std::flush;
     std::string insertClause = mergeCommand.substr(insertClauseStart);
     insertClause = trim(insertClause);
     // Remove surrounding parentheses if present.
