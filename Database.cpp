@@ -148,7 +148,43 @@ void Database::selectRecords(const std::string& tableName,
             std::cout << std::flush;
             return;
         }
-        tables[lowerName]->selectRows(selectColumns, condition, orderByColumns, groupByColumns, havingCondition);
+        auto result = tables[lowerName]->selectRows(selectColumns, condition, orderByColumns, groupByColumns, havingCondition);
+
+// Get the column names to print headers
+const auto& columns = tables[lowerName]->getColumns();
+
+// Print header
+for (const auto& col : selectColumns == std::vector<std::string>{"*"} ? columns : selectColumns) {
+    std::cout << col << "\t";
+}
+std::cout << "\n";
+
+// Print each row
+for (const auto& row : result) {
+    for (const auto& val : row) {
+        std::cout << val << "\t";
+    }
+    std::cout << "\n";
+}
+ingCondition);
+
+// Get the column names to print headers
+const auto& columns = tables[lowerName]->getColumns();
+
+// Print header
+for (const auto& col : selectColumns == std::vector<std::string>{"*"} ? columns : selectColumns) {
+    std::cout << col << "\t";
+}
+std::cout << "\n";
+
+// Print each row
+for (const auto& row : result) {
+    for (const auto& val : row) {
+        std::cout << val << "\t";
+    }
+    std::cout << "\n";
+}
+
     } else {
         // JOIN implementation (nested-loop inner join)
         std::string leftName = toLowerCase(tableName);
