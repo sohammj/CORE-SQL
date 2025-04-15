@@ -205,32 +205,30 @@ struct UserDefinedType {
 
 // Global registry for user-defined types
 class UserTypeRegistry {
-private:
-    static std::unordered_map<std::string, UserDefinedType> types;
-
-public:
-    static void registerType(const UserDefinedType& type) {
-        types[toLowerCase(type.name)] = type;
-    }
+    private:
+        static std::unordered_map<std::string, UserDefinedType> types;
     
-    static bool typeExists(const std::string& typeName) {
-        return types.find(toLowerCase(typeName)) != types.end();
-    }
-    
-    static const UserDefinedType& getType(const std::string& typeName) {
-        auto it = types.find(toLowerCase(typeName));
-        if (it == types.end()) {
-            throw DatabaseException("User-defined type '" + typeName + "' does not exist");
+    public:
+        static void registerType(const UserDefinedType& type) {
+            types[toLowerCase(type.name)] = type;
         }
-        return it->second;
-    }
-    
-    static void removeType(const std::string& typeName) {
-        types.erase(toLowerCase(typeName));
-    }
-};
+        
+        static bool typeExists(const std::string& typeName) {
+            return types.find(toLowerCase(typeName)) != types.end();
+        }
+        
+        static const UserDefinedType& getType(const std::string& typeName) {
+            auto it = types.find(toLowerCase(typeName));
+            if (it == types.end()) {
+                throw DatabaseException("User-defined type '" + typeName + "' does not exist");
+            }
+            return it->second;
+        }
+        
+        static void removeType(const std::string& typeName) {
+            types.erase(toLowerCase(typeName));
+        }
+    };
 
-// Initialize static member
-std::unordered_map<std::string, UserDefinedType> UserTypeRegistry::types = {};
 
 #endif // UTILS_H

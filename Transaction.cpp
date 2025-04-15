@@ -286,3 +286,30 @@ void Transaction::restoreTableState(const std::string& tableName) {
         }
     }
 }
+// Add to Transaction.cpp if needed
+
+// When main.cpp calls database->commitTransaction(transaction)
+void Database::commitTransaction(Transaction* transaction) {
+    if (!transaction || !transaction->isActive()) {
+        std::cout << "No active transaction to commit." << std::endl;
+        return;
+    }
+    
+    transaction->commit();
+    
+    // Remove from active transactions
+    activeTransactions.erase(transaction);
+}
+
+// When main.cpp calls database->rollbackTransaction(transaction)
+void Database::rollbackTransaction(Transaction* transaction) {
+    if (!transaction || !transaction->isActive()) {
+        std::cout << "No active transaction to rollback." << std::endl;
+        return;
+    }
+    
+    transaction->rollback();
+    
+    // Remove from active transactions
+    activeTransactions.erase(transaction);
+}

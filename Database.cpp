@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
+#include "ConditionParser.h"
+#include "Parser.h"
 
 // Create table
 void Database::createTable(const std::string& tableName,
@@ -134,10 +136,10 @@ void Database::selectRecords(const std::string& tableName,
         if (dotPos != std::string::npos)
             rightJoin = rightJoin.substr(dotPos + 1);
         
-        Table& leftTable = tables[leftName];
-        Table& rightTable = tables[rightName];
-        const auto& leftCols = leftTable.getColumns();
-        const auto& rightCols = rightTable.getColumns();
+        Table* leftTable = tables[leftName].get();
+        Table* rightTable = tables[rightName].get();
+        const auto& leftCols = leftTable->getColumns();
+        const auto& rightCols = rightTable->getColumns();
         auto lit = std::find(leftCols.begin(), leftCols.end(), leftJoin);
         auto rit = std::find(rightCols.begin(), rightCols.end(), rightJoin);
         if (lit == leftCols.end() || rit == rightCols.end()) {
@@ -152,8 +154,8 @@ void Database::selectRecords(const std::string& tableName,
         for (const auto& col : rightCols)
             combinedHeader.push_back(col);
         
-        const auto& leftRows = leftTable.getRows();
-        const auto& rightRows = rightTable.getRows();
+        const auto& leftRows = leftTable->getRows();
+        const auto& rightRows = rightTable->getRows();
         for (const auto& lrow : leftRows) {
             for (const auto& rrow : rightRows) {
                 if (lrow[leftIdx] == rrow[rightIdx]) {
@@ -225,35 +227,49 @@ void Database::showTables() {
 }
 
 // Transaction functions
-void Database::beginTransaction() {
+Transaction* Database::beginTransaction() {
     if (!inTransaction) {
-        backupTables = tables;
+        // Deep copy tables
+        backupTables.clear();
+        for (const auto& [name, tablePtr] : tables) {
+            // Create a new table with the same name
+            auto tableCopy = std::make_unique<Table>(tablePtr->getName());
+            // Copy columns, rows, constraints, etc. as needed
+            // This depends on having copy methods in your Table class
+            
+            backupTables[name] = std::move(tableCopy);
+        }
         inTransaction = true;
         std::cout << "Transaction started." << std::endl;
-    } else {
+        return new Transaction(this);
+    }  // Pass 'this' as the database pointer
+    else {
         std::cout << "Transaction already in progress." << std::endl;
+        return nullptr;
     }
 }
 
-void Database::commitTransaction() {
+Transaction* Database::commitTransaction() {
     if (!inTransaction) {
        std::cout << "No active transaction to commit." << std::endl;
-       return;
+       return nullptr;
     }
     inTransaction = false;
     backupTables.clear();
     std::cout << "Transaction committed." << std::endl;
+    return nullptr;
 }
 
-void Database::rollbackTransaction() {
+Transaction* Database::rollbackTransaction() {
     if (!inTransaction) {
        std::cout << "No active transaction to rollback." << std::endl;
-       return;
+       return nullptr;
     }
-    tables = backupTables;
+    tables = std::move(backupTables);
     backupTables.clear();
     inTransaction = false;
     std::cout << "Transaction rolled back." << std::endl;
+    return nullptr;
 }
 
 // New functionalities
@@ -422,7 +438,7 @@ void Database::mergeRecords(const std::string& tableName, const std::string& mer
         std::cout << "MERGE: Table " << tableName << " does not exist." << std::endl;
         return;
     }
-    const auto& targetCols = tables[lowerTable].getColumns();
+    const auto& targetCols = tables[lowerTable]->getColumns();
     // Find the index of the target column in the table.
     int targetIndex = -1;
     for (size_t i = 0; i < targetCols.size(); i++) {
@@ -438,7 +454,7 @@ void Database::mergeRecords(const std::string& tableName, const std::string& mer
     
     bool matched = false;
     // Check each row for a match on the ON condition.
-    for (auto &row : tables[lowerTable].getRowsNonConst()) {
+    for (auto &row : tables[lowerTable]->getRowsNonConst()) {
         if (row.size() > targetIndex && toLowerCase(row[targetIndex]) == toLowerCase(srcRecord[srcColumn])) {
             // When matched, update the row using the UPDATE assignments.
             for (size_t j = 0; j < targetCols.size(); j++) {
@@ -461,7 +477,7 @@ void Database::mergeRecords(const std::string& tableName, const std::string& mer
             else
                 newRow.push_back("");
         }
-        tables[lowerTable].addRow(newRow);
+        tables[lowerTable]->addRow(newRow);
     }
     
     std::cout << "MERGE command executed on " << tableName << "." << std::endl;
@@ -488,28 +504,407 @@ void Database::replaceInto(const std::string& tableName, const std::vector<std::
     }
     std::cout << "REPLACE INTO executed on " << tableName << "." << std::endl;
 }
+// Add these implementations to Database.cpp
 
-void Database::sortPhotos(const std::string& tableName, const std::string& column, bool ascending) {
-    std::string lowerName = toLowerCase(tableName);
-    if (tables.find(lowerName) == tables.end()) {
-        std::cout << "Table " << tableName << " does not exist." << std::endl;
+Database::Database() {
+    // Initialize the catalog
+    catalog = Catalog();
+    
+    // Create admin user by default
+    users["admin"] = User("admin", "admin");
+}
+
+Database::~Database() {
+    // Clean up any resources
+    // For tables, the unique_ptr will automatically clean up
+}
+
+// Authentication and authorization
+bool Database::createUser(const std::string& username, const std::string& password) {
+    std::string lowerName = toLowerCase(username);
+    if (users.find(lowerName) != users.end()) {
+        std::cout << "User '" << username << "' already exists." << std::endl;
+        return false;
+    }
+    
+    users[lowerName] = User(username, password);
+    std::cout << "User '" << username << "' created." << std::endl;
+    return true;
+}
+
+bool Database::authenticate(const std::string& username, const std::string& password) {
+    std::string lowerName = toLowerCase(username);
+    if (users.find(lowerName) == users.end()) {
+        return false;
+    }
+    
+    return users[lowerName].authenticate(password);
+}
+
+void Database::grantPrivilege(const std::string& username, const std::string& tableName, 
+                             const std::string& privilege) {
+    std::string lowerUser = toLowerCase(username);
+    if (users.find(lowerUser) == users.end()) {
+        std::cout << "User '" << username << "' does not exist." << std::endl;
         return;
     }
-    tables[lowerName]->sortRows(column, ascending);
-    std::cout << "Photos sorted in " << tableName << "." << std::endl;
+    
+    std::string lowerTable = toLowerCase(tableName);
+    if (tables.find(lowerTable) == tables.end() && views.find(lowerTable) == views.end()) {
+        std::cout << "Table or view '" << tableName << "' does not exist." << std::endl;
+        return;
+    }
+    
+    std::string upperPriv = toUpperCase(privilege);
+    Privilege::Type privType;
+    
+    if (upperPriv == "SELECT") {
+        privType = Privilege::Type::SELECT;
+    } else if (upperPriv == "INSERT") {
+        privType = Privilege::Type::INSERT;
+    } else if (upperPriv == "UPDATE") {
+        privType = Privilege::Type::UPDATE;
+    } else if (upperPriv == "DELETE") {
+        privType = Privilege::Type::DELETE;
+    } else if (upperPriv == "ALL") {
+        privType = Privilege::Type::ALL;
+    } else {
+        std::cout << "Invalid privilege type: " << privilege << std::endl;
+        return;
+    }
+    
+    users[lowerUser].grantPrivilege(tableName, privType);
+    std::cout << "Granted " << privilege << " on " << tableName << " to " << username << std::endl;
 }
 
-void Database::trackRecentPhoto(const std::string& filename) {
-    recentPhotos.push(filename);
-    std::cout << "Photo " << filename << " tracked as recent." << std::endl;
+void Database::revokePrivilege(const std::string& username, const std::string& tableName, 
+                              const std::string& privilege) {
+    std::string lowerUser = toLowerCase(username);
+    if (users.find(lowerUser) == users.end()) {
+        std::cout << "User '" << username << "' does not exist." << std::endl;
+        return;
+    }
+    
+    std::string upperPriv = toUpperCase(privilege);
+    Privilege::Type privType;
+    
+    if (upperPriv == "SELECT") {
+        privType = Privilege::Type::SELECT;
+    } else if (upperPriv == "INSERT") {
+        privType = Privilege::Type::INSERT;
+    } else if (upperPriv == "UPDATE") {
+        privType = Privilege::Type::UPDATE;
+    } else if (upperPriv == "DELETE") {
+        privType = Privilege::Type::DELETE;
+    } else if (upperPriv == "ALL") {
+        privType = Privilege::Type::ALL;
+    } else {
+        std::cout << "Invalid privilege type: " << privilege << std::endl;
+        return;
+    }
+    
+    users[lowerUser].revokePrivilege(tableName, privType);
+    std::cout << "Revoked " << privilege << " on " << tableName << " from " << username << std::endl;
 }
 
-void Database::showRecentPhotos() {
-    std::cout << "Recent Photos:" << std::endl;
-    while (!recentPhotos.empty()) {
-        std::cout << recentPhotos.top() << std::endl;
-        recentPhotos.pop();
+bool Database::checkPrivilege(const std::string& username, const std::string& tableName, 
+                             const std::string& privilege) {
+    // Admin always has all privileges
+    if (toLowerCase(username) == "admin") {
+        return true;
+    }
+    
+    std::string lowerUser = toLowerCase(username);
+    if (users.find(lowerUser) == users.end()) {
+        return false;
+    }
+    
+    std::string upperPriv = toUpperCase(privilege);
+    Privilege::Type privType;
+    
+    if (upperPriv == "SELECT") {
+        privType = Privilege::Type::SELECT;
+    } else if (upperPriv == "INSERT") {
+        privType = Privilege::Type::INSERT;
+    } else if (upperPriv == "UPDATE") {
+        privType = Privilege::Type::UPDATE;
+    } else if (upperPriv == "DELETE") {
+        privType = Privilege::Type::DELETE;
+    } else if (upperPriv == "ALL") {
+        privType = Privilege::Type::ALL;
+    } else {
+        return false;
+    }
+    
+    return users[lowerUser].hasPrivilege(tableName, privType);
+}
+
+// Custom type support
+void Database::createType(const std::string& typeName, const std::vector<std::pair<std::string, std::string>>& attributes) {
+    // Register the type in the global registry
+    UserDefinedType type;
+    type.name = typeName;
+    type.attributes = attributes;
+    
+    UserTypeRegistry::registerType(type);
+    
+    // Add to catalog
+    catalog.addType(typeName, attributes);
+    
+    std::cout << "Type " << typeName << " created." << std::endl;
+}
+
+// View management
+void Database::createView(const std::string& viewName, const std::string& viewDefinition) {
+    std::string lowerName = toLowerCase(viewName);
+    if (views.find(lowerName) != views.end() || tables.find(lowerName) != tables.end()) {
+        std::cout << "View or table '" << viewName << "' already exists." << std::endl;
+        return;
+    }
+    
+    views[lowerName] = viewDefinition;
+    
+    // Add to catalog
+    catalog.addView(viewName, viewDefinition);
+    
+    std::cout << "View " << viewName << " created." << std::endl;
+}
+
+void Database::dropView(const std::string& viewName) {
+    std::string lowerName = toLowerCase(viewName);
+    if (views.find(lowerName) == views.end()) {
+        std::cout << "View '" << viewName << "' does not exist." << std::endl;
+        return;
+    }
+    
+    views.erase(lowerName);
+    
+    // Remove from catalog
+    catalog.removeView(viewName);
+    
+    std::cout << "View " << viewName << " dropped." << std::endl;
+}
+
+// Assertion management
+void Database::createAssertion(const std::string& name, const std::string& condition) {
+    if (assertions.find(toLowerCase(name)) != assertions.end()) {
+        std::cout << "Assertion '" << name << "' already exists." << std::endl;
+        return;
+    }
+    
+    // Verify the condition is valid
+    try {
+        ConditionParser parser(condition);
+        parser.parse();
+    } catch (const std::exception& e) {
+        std::cout << "Invalid assertion condition: " << e.what() << std::endl;
+        return;
+    }
+    
+    assertions[toLowerCase(name)] = condition;
+    
+    // Add to catalog
+    catalog.addAssertion(name, condition);
+    
+    std::cout << "Assertion " << name << " created." << std::endl;
+}
+
+// Table modification
+void Database::alterTableAddConstraint(const std::string& tableName, const Constraint& constraint) {
+    std::string lowerName = toLowerCase(tableName);
+    if (tables.find(lowerName) == tables.end()) {
+        std::cout << "Table '" << tableName << "' does not exist." << std::endl;
+        return;
+    }
+    
+    try {
+        validateReferences(constraint);
+        tables[lowerName]->addConstraint(constraint);
+        std::cout << "Constraint added to " << tableName << "." << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << "Failed to add constraint: " << e.what() << std::endl;
     }
 }
 
-// Other methods remain unchanged
+void Database::alterTableDropConstraint(const std::string& tableName, const std::string& constraintName) {
+    std::string lowerName = toLowerCase(tableName);
+    if (tables.find(lowerName) == tables.end()) {
+        std::cout << "Table '" << tableName << "' does not exist." << std::endl;
+        return;
+    }
+    
+    bool success = tables[lowerName]->dropConstraint(constraintName);
+    if (success) {
+        std::cout << "Constraint " << constraintName << " dropped from " << tableName << "." << std::endl;
+    } else {
+        std::cout << "Constraint " << constraintName << " does not exist in " << tableName << "." << std::endl;
+    }
+}
+
+// Reference validation
+void Database::validateReferences(const Constraint& constraint) {
+    if (constraint.type != Constraint::Type::FOREIGN_KEY) {
+        return; // Nothing to validate for non-foreign key constraints
+    }
+    
+    std::string lowerRefTable = toLowerCase(constraint.referencedTable);
+    if (tables.find(lowerRefTable) == tables.end()) {
+        throw DatabaseException("Referenced table '" + constraint.referencedTable + "' does not exist");
+    }
+    
+    // Get the referenced table
+    Table* refTable = tables[lowerRefTable].get();
+    
+    // Check if referenced columns exist in the referenced table
+    for (const auto& col : constraint.referencedColumns) {
+        if (!refTable->hasColumn(col)) {
+            throw DatabaseException("Referenced column '" + col + "' does not exist in table '" + 
+                                  constraint.referencedTable + "'");
+        }
+    }
+    
+    // Columns count should match
+    if (constraint.columns.size() != constraint.referencedColumns.size()) {
+        throw DatabaseException("Number of columns in foreign key constraint does not match referenced columns");
+    }
+}
+
+// Set operations
+void Database::setOperation(const std::string& operation, 
+                           const std::string& leftQuery, 
+                           const std::string& rightQuery) {
+    // Parse and execute both queries
+    Parser parser;
+    Query leftQ = parser.parseQuery(leftQuery);
+    Query rightQ = parser.parseQuery(rightQuery);
+    
+    // Get results from both queries
+    std::vector<std::vector<std::string>> leftResult;
+    std::vector<std::vector<std::string>> rightResult;
+    
+    // Execute left query
+    std::string lowerLeftTable = toLowerCase(leftQ.tableName);
+    if (tables.find(lowerLeftTable) == tables.end()) {
+        std::cout << "Table '" << leftQ.tableName << "' does not exist." << std::endl;
+        return;
+    }
+    
+    leftResult = tables[lowerLeftTable]->selectRows(
+        leftQ.selectColumns, leftQ.condition, 
+        leftQ.orderByColumns, leftQ.groupByColumns, leftQ.havingCondition);
+    
+    // Execute right query
+    std::string lowerRightTable = toLowerCase(rightQ.tableName);
+    if (tables.find(lowerRightTable) == tables.end()) {
+        std::cout << "Table '" << rightQ.tableName << "' does not exist." << std::endl;
+        return;
+    }
+    
+    rightResult = tables[lowerRightTable]->selectRows(
+        rightQ.selectColumns, rightQ.condition, 
+        rightQ.orderByColumns, rightQ.groupByColumns, rightQ.havingCondition);
+    
+    // Apply set operation
+    std::vector<std::vector<std::string>> result;
+    std::string upperOp = toUpperCase(operation);
+    
+    if (upperOp == "UNION") {
+        result = tables[lowerLeftTable]->setUnion(rightResult);
+    } else if (upperOp == "INTERSECT") {
+        result = tables[lowerLeftTable]->setIntersect(rightResult);
+    } else if (upperOp == "EXCEPT") {
+        result = tables[lowerLeftTable]->setExcept(rightResult);
+    } else {
+        std::cout << "Unsupported set operation: " << operation << std::endl;
+        return;
+    }
+    
+    // Display results
+    std::vector<std::string> displayColumns = leftQ.selectColumns;
+    for (const auto& col : displayColumns) {
+        std::cout << col << "\t";
+    }
+    std::cout << std::endl;
+    
+    for (const auto& row : result) {
+        for (const auto& cell : row) {
+            std::cout << cell << "\t";
+        }
+        std::cout << std::endl;
+    }
+}
+
+// Join tables
+void Database::joinTables(const std::string& leftTable, 
+                          const std::string& rightTable,
+                          const std::string& joinType,
+                          const std::string& joinCondition,
+                          const std::vector<std::string>& selectColumns) {
+    std::string lowerLeftTable = toLowerCase(leftTable);
+    std::string lowerRightTable = toLowerCase(rightTable);
+    
+    if (tables.find(lowerLeftTable) == tables.end()) {
+        std::cout << "Table '" << leftTable << "' does not exist." << std::endl;
+        return;
+    }
+    
+    if (tables.find(lowerRightTable) == tables.end()) {
+        std::cout << "Table '" << rightTable << "' does not exist." << std::endl;
+        return;
+    }
+    
+    std::vector<std::vector<std::string>> result;
+    std::string upperJoinType = toUpperCase(joinType);
+    
+    if (upperJoinType == "INNER") {
+        result = tables[lowerLeftTable]->innerJoin(*tables[lowerRightTable], joinCondition, selectColumns);
+    } else if (upperJoinType == "LEFT OUTER" || upperJoinType == "LEFT") {
+        result = tables[lowerLeftTable]->leftOuterJoin(*tables[lowerRightTable], joinCondition, selectColumns);
+    } else if (upperJoinType == "RIGHT OUTER" || upperJoinType == "RIGHT") {
+        result = tables[lowerLeftTable]->rightOuterJoin(*tables[lowerRightTable], joinCondition, selectColumns);
+    } else if (upperJoinType == "FULL OUTER" || upperJoinType == "FULL") {
+        result = tables[lowerLeftTable]->fullOuterJoin(*tables[lowerRightTable], joinCondition, selectColumns);
+    } else if (upperJoinType == "NATURAL") {
+        result = tables[lowerLeftTable]->naturalJoin(*tables[lowerRightTable], selectColumns);
+    } else {
+        std::cout << "Unsupported join type: " << joinType << std::endl;
+        return;
+    }
+    
+    // Display results
+    for (const auto& col : selectColumns) {
+        std::cout << col << "\t";
+    }
+    std::cout << std::endl;
+    
+    for (const auto& row : result) {
+        for (const auto& cell : row) {
+            std::cout << cell << "\t";
+        }
+        std::cout << std::endl;
+    }
+}
+
+// Table access
+Table* Database::getTable(const std::string& tableName, bool exclusiveLock) {
+    std::string lowerName = toLowerCase(tableName);
+    auto it = tables.find(lowerName);
+    if (it == tables.end()) {
+        return nullptr;
+    }
+    
+    Table* table = it->second.get();
+    
+    if (exclusiveLock) {
+        table->lockExclusive();
+    } else {
+        table->lockShared();
+    }
+    
+    return table;
+}
+
+// Schema information
+void Database::showSchema() {
+    catalog.showSchema();
+}

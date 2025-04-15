@@ -933,7 +933,7 @@ std::vector<std::string> Parser::extractSubqueries(const std::string& query) {
     std::vector<std::string> subqueries;
     
     // Find all subqueries in parentheses
-    std::regex subqueryRegex(R"\(([^()]*)\)");
+    std::regex subqueryRegex(R"(\(([^()]*)\))");
     std::string::const_iterator searchStart(query.cbegin());
     std::smatch match;
     

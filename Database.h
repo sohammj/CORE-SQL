@@ -16,9 +16,11 @@
 
 class Database {
 public:
+Transaction* commitTransaction();
+    Transaction* rollbackTransaction();
     Database();
     ~Database();
-
+    
     // DDL operations
     void createTable(const std::string& tableName,
                      const std::vector<std::pair<std::string, std::string>>& columns,
@@ -118,6 +120,8 @@ public:
     Table* getTable(const std::string& tableName, bool exclusiveLock = false);
 
 private:
+    bool inTransaction = false;
+    std::unordered_map<std::string, std::unique_ptr<Table>> backupTables;
     std::unordered_map<std::string, std::unique_ptr<Table>> tables;
     std::unordered_map<std::string, std::string> views;
     std::unordered_map<std::string, std::pair<std::string, std::string>> indexes;
