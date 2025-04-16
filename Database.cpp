@@ -166,10 +166,7 @@ for (const auto& row : result) {
     }
     std::cout << "\n";
 }
-ingCondition);
 
-// Get the column names to print headers
-const auto& columns = tables[lowerName]->getColumns();
 
 // Print header
 for (const auto& col : selectColumns == std::vector<std::string>{"*"} ? columns : selectColumns) {
