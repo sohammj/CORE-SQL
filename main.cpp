@@ -251,58 +251,34 @@ int main() {
                     continue;
                 }
                 
-                // Process transaction control commands
+               // Process transaction control commands
                 if (upperCmd == "BEGIN" || upperCmd == "BEGIN TRANSACTION") {
                     if (!authenticated) {
                         std::cout << "Error: You must be logged in to begin a transaction" << std::endl;
                         continue;
                     }
                     
-                    if (currentTransaction) {
-                        std::cout << "Error: Transaction already in progress" << std::endl;
-                        continue;
-                    }
-                    
                     try {
-                        currentTransaction = db.beginTransaction();
+                        db.beginTransaction();
                     } catch (const std::exception& e) {
                         std::cerr << "Error beginning transaction: " << e.what() << std::endl;
                     }
                     continue;
                 } else if (upperCmd == "COMMIT") {
-                    if (!currentTransaction) {
-                        std::cout << "Error: No active transaction to commit" << std::endl;
-                        continue;
-                    }
-                    
                     try {
-                        db.commitTransaction(currentTransaction);
-                        currentTransaction = nullptr;
+                        db.commitTransaction();
                     } catch (const std::exception& e) {
                         std::cerr << "Error committing transaction: " << e.what() << std::endl;
                     }
                     continue;
                 } else if (upperCmd == "ROLLBACK") {
-                    if (!currentTransaction) {
-                        std::cout << "Error: No active transaction to rollback" << std::endl;
-                        continue;
-                    }
-                    
                     try {
-                        db.rollbackTransaction(currentTransaction);
-                        currentTransaction = nullptr;
+                        db.rollbackTransaction();
                     } catch (const std::exception& e) {
                         std::cerr << "Error rolling back transaction: " << e.what() << std::endl;
                     }
                     continue;
                 }
-                
-                // Authentication check for database operations
-                if (!authenticated) {
-                    std::cout << "Error: You must be logged in to perform database operations" << std::endl;
-                    continue;
-                }
-                
                 // Process the complete command
                 try {
                     Query query = parser.parseQuery(trimmedCmd);
@@ -385,8 +361,7 @@ int main() {
                         if (query.tableName == "TABLES") {
                             db.showTables();
                         } else if (query.tableName == "VIEWS") {
-                            // TODO: Implement Show Views
-                            std::cout << "TODO: Show Views not yet implemented" << std::endl;
+                            db.showViews();
                         } else if (query.tableName == "SCHEMA") {
                             db.showSchema();
                         } else {

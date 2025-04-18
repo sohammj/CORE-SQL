@@ -64,7 +64,62 @@ std::vector<std::vector<std::string>> Table::setExcept(const std::vector<std::ve
     
     return result;
 }
+// Add these near the top of table.cpp with other helper functions
 
+// This function extracts an aggregation function and column from an expression like "AVG(salary)"
+std::pair<std::string, std::string> extractAggregateFunction(const std::string& expr) {
+    std::regex aggPattern(R"((\w+)\s*\(\s*([^)]+)\s*\))");
+    std::smatch match;
+    
+    if (std::regex_search(expr, match, aggPattern) && match.size() > 2) {
+        return {toUpperCase(match[1].str()), trim(match[2].str())};
+    }
+    
+    return {"", ""};
+}
+
+// Add this helper function to handle aggregate calculations
+std::string Table::applyAggregateFunction(const std::string& function, const std::vector<std::string>& values) {
+    if (values.empty()) {
+        return "NULL";
+    }
+    
+    if (function == "AVG") {
+        return std::to_string(Aggregation::computeMean(values));
+    } else if (function == "MIN") {
+        return std::to_string(Aggregation::computeMin(values));
+    } else if (function == "MAX") {
+        return std::to_string(Aggregation::computeMax(values));
+    } else if (function == "SUM") {
+        return std::to_string(Aggregation::computeSum(values));
+    } else if (function == "COUNT") {
+        return std::to_string(Aggregation::computeCount(values));
+    } else if (function == "MEDIAN") {
+        return Aggregation::computeMedian(values);
+    } else if (function == "MODE") {
+        return Aggregation::computeMode(values);
+    } else if (function == "STDDEV" || function == "STDDEV_POP") {
+        return Aggregation::computeStdDev(values, true);
+    } else if (function == "STDDEV_SAMP") {
+        return Aggregation::computeStdDev(values, false);
+    } else if (function == "VAR" || function == "VARIANCE" || function == "VAR_POP") {
+        return Aggregation::computeVariance(values, true);
+    } else if (function == "VAR_SAMP") {
+        return Aggregation::computeVariance(values, false);
+    } else if (function.find("PERCENTILE_") == 0) {
+        // Handle PERCENTILE_XX functions like PERCENTILE_50 (median)
+        try {
+            double percentile = std::stod(function.substr(11));
+            return std::to_string(Aggregation::computePercentile(values, percentile));
+        } catch (...) {
+            return "NULL";
+        }
+    } else if (function.find("STRING_AGG") == 0 || function == "GROUP_CONCAT") {
+        return Aggregation::computeStringConcat(values, ",");
+    }
+    
+    return "NULL"; // Unsupported function
+}
 // Transaction Support
 // -------------------
 
@@ -123,6 +178,7 @@ int Table::getColumnIndex(const std::string& columnName) const {
 // Join Operations
 // ---------------
 
+// In Table.cpp, improve the innerJoin method
 std::vector<std::vector<std::string>> Table::innerJoin(
     Table& rightTable,
     const std::string& condition,
@@ -131,31 +187,77 @@ std::vector<std::vector<std::string>> Table::innerJoin(
     std::shared_lock<std::shared_mutex> lockLeft(mutex);
     std::shared_lock<std::shared_mutex> lockRight(rightTable.mutex);
     
-    std::vector<std::string> joinedColumns = columns;
-    joinedColumns.insert(joinedColumns.end(), rightTable.columns.begin(), rightTable.columns.end());
+    // Create combined columns for the join result
+    std::vector<std::string> joinedColumns;
+    for (const auto& col : columns) {
+        joinedColumns.push_back(col);
+    }
+    for (const auto& col : rightTable.columns) {
+        joinedColumns.push_back(col);
+    }
     
-    ConditionParser cp(condition);
-    auto expr = cp.parse();
+    // Parse join condition
+    size_t eqPos = condition.find('=');
+    if (eqPos == std::string::npos) {
+        throw DatabaseException("Invalid join condition format");
+    }
+    
+    std::string leftCol = trim(condition.substr(0, eqPos));
+    std::string rightCol = trim(condition.substr(eqPos + 1));
+    
+    // Handle table aliases (e.g., "s.id" instead of just "id")
+    size_t leftDot = leftCol.find('.');
+    size_t rightDot = rightCol.find('.');
+    
+    std::string leftColName = (leftDot != std::string::npos) ? leftCol.substr(leftDot + 1) : leftCol;
+    std::string rightColName = (rightDot != std::string::npos) ? rightCol.substr(rightDot + 1) : rightCol;
+    
+    // Find column indices
+    int leftIdx = getColumnIndex(leftColName);
+    int rightIdx = rightTable.getColumnIndex(rightColName);
+    
+    if (leftIdx == -1 || rightIdx == -1) {
+        throw DatabaseException("Join columns not found: " + leftColName + " or " + rightColName);
+    }
     
     std::vector<std::vector<std::string>> result;
     
+    // Perform the join
     for (const auto& leftRow : rows) {
         for (const auto& rightRow : rightTable.rows) {
-            std::vector<std::string> combinedRow;
-            combinedRow.insert(combinedRow.end(), leftRow.begin(), leftRow.end());
-            combinedRow.insert(combinedRow.end(), rightRow.begin(), rightRow.end());
-            
-            if (expr->evaluate(combinedRow, joinedColumns)) {
+            if (leftRow[leftIdx] == rightRow[rightIdx]) {
+                std::vector<std::string> joinedRow;
+                
+                // Combine the rows
+                joinedRow.insert(joinedRow.end(), leftRow.begin(), leftRow.end());
+                joinedRow.insert(joinedRow.end(), rightRow.begin(), rightRow.end());
+                
+                // Project only the requested columns
                 std::vector<std::string> resultRow;
                 for (const auto& col : selectColumns) {
-                    auto it = std::find(joinedColumns.begin(), joinedColumns.end(), col);
-                    if (it != joinedColumns.end()) {
-                        int idx = std::distance(joinedColumns.begin(), it);
-                        resultRow.push_back(combinedRow[idx]);
+                    // Handle column references with aliases
+                    std::string colName = col;
+                    size_t dotPos = col.find('.');
+                    if (dotPos != std::string::npos) {
+                        colName = col.substr(dotPos + 1);
+                    }
+                    
+                    int idx = -1;
+                    // Check in left table first
+                    int leftColIdx = getColumnIndex(colName);
+                    if (leftColIdx != -1) {
+                        resultRow.push_back(leftRow[leftColIdx]);
                     } else {
-                        resultRow.push_back("");
+                        // Try in right table
+                        int rightColIdx = rightTable.getColumnIndex(colName);
+                        if (rightColIdx != -1) {
+                            resultRow.push_back(rightRow[rightColIdx]);
+                        } else {
+                            resultRow.push_back(""); // Column not found
+                        }
                     }
                 }
+                
                 result.push_back(resultRow);
             }
         }
@@ -672,6 +774,7 @@ int Table::addRowWithId(int rowId, const std::vector<std::string>& values) {
 // Data Querying
 // -------------
 
+// In Table.cpp, improve the selectRows method for GROUP BY
 std::vector<std::vector<std::string>> Table::selectRows(
     const std::vector<std::string>& selectColumns,
     const std::string& condition,
@@ -702,87 +805,160 @@ std::vector<std::vector<std::string>> Table::selectRows(
         filteredRows = rows;
     }
     
-    // Handle aggregation
-    bool hasAggregate = false;
-    std::vector<std::string> aggregateResults;
-    
-    for (const auto& colExpr : displayColumns) {
-        size_t pos1 = colExpr.find('(');
-        size_t pos2 = colExpr.find(')');
+    // Handle GROUP BY clause
+    if (!groupByColumns.empty()) {
+        std::unordered_map<std::string, std::vector<std::vector<std::string>>> groups;
         
-        if (pos1 != std::string::npos && pos2 != std::string::npos) {
-            hasAggregate = true;
-            std::string func = toUpperCase(trim(colExpr.substr(0, pos1)));
-            std::string colName = trim(colExpr.substr(pos1 + 1, pos2 - pos1 - 1));
-            
-            auto it = std::find(columns.begin(), columns.end(), colName);
-            if (it == columns.end() && colName != "*") {
-                aggregateResults.push_back("");
-                continue;
+        // Group rows based on the GROUP BY columns
+        for (const auto& row : filteredRows) {
+            std::string groupKey;
+            for (const auto& groupCol : groupByColumns) {
+                auto it = std::find(columns.begin(), columns.end(), groupCol);
+                if (it != columns.end()) {
+                    int idx = std::distance(columns.begin(), it);
+                    groupKey += row[idx] + "|";
+                }
             }
+            groups[groupKey].push_back(row);
+        }
+        
+        std::vector<std::vector<std::string>> groupedResult;
+        
+        // Process each group
+        for (const auto& [key, groupRows] : groups) {
+            std::vector<std::string> resultRow;
             
-            int idx = (colName == "*") ? -1 : std::distance(columns.begin(), it);
-            std::vector<std::string> colValues;
-            
-            if (idx >= 0) {
-                for (const auto& row : filteredRows) {
-                    colValues.push_back(row[idx]);
+            for (const auto& colExpr : displayColumns) {
+                size_t pos1 = colExpr.find('(');
+                size_t pos2 = colExpr.find(')');
+                
+                if (pos1 != std::string::npos && pos2 != std::string::npos) {
+                    // This is an aggregate function
+                    std::string func = toUpperCase(trim(colExpr.substr(0, pos1)));
+                    std::string colName = trim(colExpr.substr(pos1 + 1, pos2 - pos1 - 1));
+                    
+                    std::vector<std::string> colValues;
+                    if (colName == "*") {
+                        // COUNT(*) case
+                        if (func == "COUNT") {
+                            resultRow.push_back(std::to_string(groupRows.size()));
+                        }
+                    } else {
+                        // Get column values for this group
+                        auto it = std::find(columns.begin(), columns.end(), colName);
+                        if (it != columns.end()) {
+                            int idx = std::distance(columns.begin(), it);
+                            for (const auto& groupRow : groupRows) {
+                                colValues.push_back(groupRow[idx]);
+                            }
+                            
+                            // Apply aggregate function
+                            if (func == "AVG") {
+                                resultRow.push_back(std::to_string(Aggregation::computeMean(colValues)));
+                            } else if (func == "MIN") {
+                                resultRow.push_back(std::to_string(Aggregation::computeMin(colValues)));
+                            } else if (func == "MAX") {
+                                resultRow.push_back(std::to_string(Aggregation::computeMax(colValues)));
+                            } else if (func == "SUM") {
+                                resultRow.push_back(std::to_string(Aggregation::computeSum(colValues)));
+                            } else if (func == "COUNT") {
+                                resultRow.push_back(std::to_string(Aggregation::computeCount(colValues)));
+                            }
+                        } else {
+                            resultRow.push_back("");
+                        }
+                    }
+                } else {
+                    // Regular column, must be in GROUP BY
+                    auto it = std::find(columns.begin(), columns.end(), colExpr);
+                    if (it != columns.end()) {
+                        int idx = std::distance(columns.begin(), it);
+                        if (!groupRows.empty()) {
+                            resultRow.push_back(groupRows[0][idx]);
+                        } else {
+                            resultRow.push_back("");
+                        }
+                    } else {
+                        resultRow.push_back("");
+                    }
                 }
             }
             
-            if (func == "COUNT" && colName == "*") {
-                aggregateResults.push_back(std::to_string(filteredRows.size()));
-            } else if (func == "AVG") {
-                aggregateResults.push_back(std::to_string(Aggregation::computeMean(colValues)));
-            } else if (func == "MIN") {
-                aggregateResults.push_back(std::to_string(Aggregation::computeMin(colValues)));
-            } else if (func == "MAX") {
-                aggregateResults.push_back(std::to_string(Aggregation::computeMax(colValues)));
-            } else if (func == "SUM") {
-                aggregateResults.push_back(std::to_string(Aggregation::computeSum(colValues)));
-            } else if (func == "MEDIAN") {
-                aggregateResults.push_back(Aggregation::computeMedian(colValues));
-            } else if (func == "MODE") {
-                aggregateResults.push_back(Aggregation::computeMode(colValues));
-            }
-        } else {
-            if (hasAggregate && std::find(groupByColumns.begin(), groupByColumns.end(), colExpr) == groupByColumns.end()) {
-                throw DatabaseException("Column '" + colExpr + "' must appear in GROUP BY clause");
-            }
-            aggregateResults.push_back("");
+            groupedResult.push_back(resultRow);
         }
+        
+        return groupedResult;
     }
     
-    std::vector<std::vector<std::string>> resultRows;
-    
-    if (hasAggregate && groupByColumns.empty()) {
+    // If no GROUP BY, handle simple queries
+    std::vector<std::vector<std::string>> result;
+    for (const auto& row : filteredRows) {
         std::vector<std::string> resultRow;
-        for (size_t i = 0; i < displayColumns.size(); ++i) {
-            if (!aggregateResults[i].empty()) {
-                resultRow.push_back(aggregateResults[i]);
+        for (const auto& col : displayColumns) {
+            size_t pos1 = col.find('(');
+            size_t pos2 = col.find(')');
+            
+            if (pos1 != std::string::npos && pos2 != std::string::npos) {
+                // This is an aggregate function (without GROUP BY)
+                std::string func = toUpperCase(trim(col.substr(0, pos1)));
+                std::string colName = trim(col.substr(pos1 + 1, pos2 - pos1 - 1));
+                
+                std::vector<std::string> colValues;
+                if (colName == "*") {
+                    // COUNT(*) case
+                    if (func == "COUNT") {
+                        resultRow.push_back(std::to_string(filteredRows.size()));
+                    }
+                } else {
+                    // Get all column values
+                    auto it = std::find(columns.begin(), columns.end(), colName);
+                    if (it != columns.end()) {
+                        int idx = std::distance(columns.begin(), it);
+                        for (const auto& frow : filteredRows) {
+                            colValues.push_back(frow[idx]);
+                        }
+                        
+                        // Apply aggregate function
+                        if (func == "AVG") {
+                            resultRow.push_back(std::to_string(Aggregation::computeMean(colValues)));
+                        } else if (func == "MIN") {
+                            resultRow.push_back(std::to_string(Aggregation::computeMin(colValues)));
+                        } else if (func == "MAX") {
+                            resultRow.push_back(std::to_string(Aggregation::computeMax(colValues)));
+                        } else if (func == "SUM") {
+                            resultRow.push_back(std::to_string(Aggregation::computeSum(colValues)));
+                        } else if (func == "COUNT") {
+                            resultRow.push_back(std::to_string(Aggregation::computeCount(colValues)));
+                        }
+                    } else {
+                        resultRow.push_back("");
+                    }
+                }
             } else {
-                auto it = std::find(columns.begin(), columns.end(), displayColumns[i]);
-                if (it != columns.end() && !filteredRows.empty()) {
+                // Regular column
+                auto it = std::find(columns.begin(), columns.end(), col);
+                if (it != columns.end()) {
                     int idx = std::distance(columns.begin(), it);
-                    resultRow.push_back(filteredRows[0][idx]);
+                    resultRow.push_back(row[idx]);
                 } else {
                     resultRow.push_back("");
                 }
             }
         }
-        resultRows.push_back(resultRow);
-        return resultRows;
-    }
-    
-    // Handle GROUP BY
-    if (!groupByColumns.empty()) {
-        // Implementation for GROUP BY
-        // ...
+        
+        result.push_back(resultRow);
+        
+        // If this is an aggregate query without GROUP BY, we only need one row
+        if (std::any_of(displayColumns.begin(), displayColumns.end(), [](const std::string& col) {
+            return col.find('(') != std::string::npos && col.find(')') != std::string::npos;
+        })) {
+            break;
+        }
     }
     
     // Handle ORDER BY
     if (!orderByColumns.empty()) {
-        std::sort(filteredRows.begin(), filteredRows.end(), 
+        std::sort(result.begin(), result.end(), 
             [&](const auto& a, const auto& b) {
                 for (const auto& token : orderByColumns) {
                     std::string colName = token;
@@ -794,32 +970,32 @@ std::vector<std::vector<std::string>> Table::selectRows(
                         colName = trim(token.substr(0, pos));
                     }
                     
-                    auto it = std::find(columns.begin(), columns.end(), colName);
-                    if (it != columns.end()) {
-                        int idx = std::distance(columns.begin(), it);
-                        return desc ? (a[idx] > b[idx]) : (a[idx] < b[idx]);
+                    auto it = std::find(displayColumns.begin(), displayColumns.end(), colName);
+                    if (it != displayColumns.end()) {
+                        int idx = std::distance(displayColumns.begin(), it);
+                        
+                        if (idx < a.size() && idx < b.size()) {
+                            // Try numeric comparison first
+                            try {
+                                double aVal = std::stod(a[idx]);
+                                double bVal = std::stod(b[idx]);
+                                if (aVal != bVal) {
+                                    return desc ? (aVal > bVal) : (aVal < bVal);
+                                }
+                            } catch (...) {
+                                // Fall back to string comparison
+                                if (a[idx] != b[idx]) {
+                                    return desc ? (a[idx] > b[idx]) : (a[idx] < b[idx]);
+                                }
+                            }
+                        }
                     }
                 }
                 return false;
             });
     }
     
-    // Project columns
-    for (const auto& row : filteredRows) {
-        std::vector<std::string> resultRow;
-        for (const auto& col : displayColumns) {
-            auto it = std::find(columns.begin(), columns.end(), col);
-            if (it != columns.end()) {
-                int idx = std::distance(columns.begin(), it);
-                resultRow.push_back(row[idx]);
-            } else {
-                resultRow.push_back("");
-            }
-        }
-        resultRows.push_back(resultRow);
-    }
-    
-    return resultRows;
+    return result;
 }
 
 // Debugging

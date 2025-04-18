@@ -132,15 +132,50 @@ void Database::insertRecord(const std::string& tableName,
     std::cout << std::flush;
 }
 
+// In Database.cpp, fix the selectRecords method
 void Database::selectRecords(const std::string& tableName,
-                                const std::vector<std::string>& selectColumns,
-                                const std::string& condition,
-                                const std::vector<std::string>& orderByColumns,
-                                const std::vector<std::string>& groupByColumns,
-                                const std::string& havingCondition,
-                                bool isJoin,
-                                const std::string& joinTable,
-                                const std::string& joinCondition) {
+    const std::vector<std::string>& selectColumns,
+    const std::string& condition,
+    const std::vector<std::string>& orderByColumns,
+    const std::vector<std::string>& groupByColumns,
+    const std::string& havingCondition,
+    bool isJoin,
+    const std::string& joinTable,
+    const std::string& joinCondition,
+    const std::string& joinType) {
+    
+    // Check if this is a view
+    std::string lowerName = toLowerCase(tableName);
+    if (views.find(lowerName) != views.end()) {
+        try {
+            // Execute the view query
+            auto result = executeViewQuery(tableName);
+            
+            // Get the column names from the view definition
+            Parser parser;
+            Query query = parser.parseQuery(views[lowerName]);
+            std::vector<std::string> viewColumns = query.selectColumns;
+            
+            // Print header
+            for (const auto& col : selectColumns == std::vector<std::string>{"*"} ? viewColumns : selectColumns) {
+                std::cout << col << "\t";
+            }
+            std::cout << "\n";
+            
+            // Print each row
+            for (const auto& row : result) {
+                for (const auto& val : row) {
+                    std::cout << val << "\t";
+                }
+                std::cout << "\n";
+            }
+            return;
+        } catch (const std::exception& e) {
+            std::cout << "Error executing view: " << e.what() << std::endl;
+            return;
+        }
+    }
+    
     if (!isJoin) {
         std::string lowerName = toLowerCase(tableName);
         if (tables.find(lowerName) == tables.end()) {
@@ -150,124 +185,161 @@ void Database::selectRecords(const std::string& tableName,
         }
         auto result = tables[lowerName]->selectRows(selectColumns, condition, orderByColumns, groupByColumns, havingCondition);
 
-// Get the column names to print headers
-const auto& columns = tables[lowerName]->getColumns();
+        // Get the column names to print headers
+        const auto& columns = tables[lowerName]->getColumns();
 
-// Print header
-for (const auto& col : selectColumns == std::vector<std::string>{"*"} ? columns : selectColumns) {
-    std::cout << col << "\t";
-}
-std::cout << "\n";
+        // Print header
+        for (const auto& col : selectColumns == std::vector<std::string>{"*"} ? columns : selectColumns) {
+            std::cout << col << "\t";
+        }
+        std::cout << "\n";
 
-// Print each row
-for (const auto& row : result) {
-    for (const auto& val : row) {
-        std::cout << val << "\t";
-    }
-    std::cout << "\n";
-}
-
-
-// Print header
-for (const auto& col : selectColumns == std::vector<std::string>{"*"} ? columns : selectColumns) {
-    std::cout << col << "\t";
-}
-std::cout << "\n";
-
-// Print each row
-for (const auto& row : result) {
-    for (const auto& val : row) {
-        std::cout << val << "\t";
-    }
-    std::cout << "\n";
-}
-
-    } else {
-        // JOIN implementation (nested-loop inner join)
+        // Print each row
+        for (const auto& row : result) {
+            for (const auto& val : row) {
+                std::cout << val << "\t";
+            }
+            std::cout << "\n";
+        }
+    } else { // JOIN implementation
         std::string leftName = toLowerCase(tableName);
         std::string rightName = toLowerCase(joinTable);
-        if (tables.find(leftName) == tables.end() || tables.find(rightName) == tables.end()) {
-            std::cout << "One or both tables in JOIN do not exist." << std::endl;
-            std::cout << std::flush;
+    
+        if (tables.find(leftName) == tables.end()) {
+            std::cout << "Table '" << tableName << "' in JOIN does not exist." << std::endl;
             return;
         }
-        size_t eqPos = joinCondition.find('=');
-        if (eqPos == std::string::npos) {
-            std::cout << "Invalid join condition." << std::endl;
-            std::cout << std::flush;
-            return;
-        }
-        std::string leftJoin = trim(joinCondition.substr(0, eqPos));
-        std::string rightJoin = trim(joinCondition.substr(eqPos + 1));
-        size_t dotPos = leftJoin.find('.');
-        if (dotPos != std::string::npos)
-            leftJoin = leftJoin.substr(dotPos + 1);
-        dotPos = rightJoin.find('.');
-        if (dotPos != std::string::npos)
-            rightJoin = rightJoin.substr(dotPos + 1);
         
+        if (tables.find(rightName) == tables.end()) {
+            std::cout << "Table '" << joinTable << "' in JOIN does not exist." << std::endl;
+            return;
+        }
+    
+        // Parse JOIN condition to get left and right column names
+        std::string leftCol, rightCol;
+        std::string leftAlias, rightAlias;
+        
+        // Handle different join syntax types
+        if (joinCondition.find('=') != std::string::npos) {
+            // ON syntax: "table1.col1 = table2.col2"
+            size_t eqPos = joinCondition.find('=');
+            std::string leftExpr = trim(joinCondition.substr(0, eqPos));
+            std::string rightExpr = trim(joinCondition.substr(eqPos + 1));
+            
+            // Extract table aliases and column names
+            size_t leftDotPos = leftExpr.find('.');
+            if (leftDotPos != std::string::npos) {
+                leftAlias = trim(leftExpr.substr(0, leftDotPos));
+                leftCol = trim(leftExpr.substr(leftDotPos + 1));
+            } else {
+                leftCol = leftExpr;
+            }
+            
+            size_t rightDotPos = rightExpr.find('.');
+            if (rightDotPos != std::string::npos) {
+                rightAlias = trim(rightExpr.substr(0, rightDotPos));
+                rightCol = trim(rightExpr.substr(rightDotPos + 1));
+            } else {
+                rightCol = rightExpr;
+            }
+        } else if (joinCondition.find("USING") != std::string::npos) {
+            // USING syntax: "USING (col)"
+            std::regex usingRegex(R"(USING\s*\(\s*([^)]+)\s*\))");
+            std::smatch match;
+            if (std::regex_search(joinCondition, match, usingRegex) && match.size() > 1) {
+                leftCol = rightCol = trim(match[1].str());
+            } else {
+                std::cout << "Invalid USING clause in JOIN." << std::endl;
+                return;
+            }
+        } else {
+            std::cout << "Invalid JOIN condition format." << std::endl;
+            return;
+        }
+        
+        // Get references to tables
         Table* leftTable = tables[leftName].get();
         Table* rightTable = tables[rightName].get();
-        const auto& leftCols = leftTable->getColumns();
-        const auto& rightCols = rightTable->getColumns();
-        auto lit = std::find(leftCols.begin(), leftCols.end(), leftJoin);
-        auto rit = std::find(rightCols.begin(), rightCols.end(), rightJoin);
-        if (lit == leftCols.end() || rit == rightCols.end()) {
-            std::cout << "Join columns not found." << std::endl;
-            std::cout << std::flush;
+        
+        // Get column indices for join columns
+        int leftColIdx = leftTable->getColumnIndex(leftCol);
+        int rightColIdx = rightTable->getColumnIndex(rightCol);
+        
+        if (leftColIdx == -1) {
+            std::cout << "Column '" << leftCol << "' not found in table '" << tableName << "'." << std::endl;
             return;
         }
-        int leftIdx = std::distance(leftCols.begin(), lit);
-        int rightIdx = std::distance(rightCols.begin(), rit);
         
-        std::vector<std::vector<std::string>> joinResult;
-        std::vector<std::string> combinedHeader = leftCols;
-        for (const auto& col : rightCols)
-            combinedHeader.push_back(col);
+        if (rightColIdx == -1) {
+            std::cout << "Column '" << rightCol << "' not found in table '" << joinTable << "'." << std::endl;
+            return;
+        }
         
-        const auto& leftRows = leftTable->getRows();
-        const auto& rightRows = rightTable->getRows();
-        for (const auto& lrow : leftRows) {
-            for (const auto& rrow : rightRows) {
-                if (lrow[leftIdx] == rrow[rightIdx]) {
-                    std::vector<std::string> combinedRow = lrow;
-                    combinedRow.insert(combinedRow.end(), rrow.begin(), rrow.end());
-                    joinResult.push_back(combinedRow);
+        // Create combined column list for result display
+        std::vector<std::string> resultColumns;
+        
+        for (const auto& col : selectColumns) {
+            if (col == "*") {
+                // Expand * to all columns from both tables
+                for (const auto& lcol : leftTable->getColumns()) {
+                    resultColumns.push_back(leftAlias.empty() ? lcol : (leftAlias + "." + lcol));
                 }
+                for (const auto& rcol : rightTable->getColumns()) {
+                    resultColumns.push_back(rightAlias.empty() ? rcol : (rightAlias + "." + rcol));
+                }
+            } else {
+                resultColumns.push_back(col);
             }
         }
         
-        std::vector<std::string> displayColumns;
-        if (selectColumns.size() == 1 && selectColumns[0] == "*")
-            displayColumns = combinedHeader;
-        else
-            displayColumns = selectColumns;
-        
-        std::vector<std::string> processedDisplayColumns;
-        for (const auto& col : displayColumns) {
-            std::string processed = col;
-            size_t dotPos = processed.find('.');
-            if (dotPos != std::string::npos)
-                processed = processed.substr(dotPos + 1);
-            processedDisplayColumns.push_back(processed);
-        }
-        
-        for (const auto& col : displayColumns)
+        // Print header
+        for (const auto& col : resultColumns) {
             std::cout << col << "\t";
+        }
         std::cout << std::endl;
         
+        // Perform the appropriate join
+        std::vector<std::vector<std::string>> joinResult;
+        
+        if (toUpperCase(joinType) == "INNER") {
+            joinResult = leftTable->innerJoin(*rightTable, joinCondition, resultColumns);
+        } else if (toUpperCase(joinType) == "LEFT" || toUpperCase(joinType) == "LEFT OUTER") {
+            joinResult = leftTable->leftOuterJoin(*rightTable, joinCondition, resultColumns);
+        } else if (toUpperCase(joinType) == "RIGHT" || toUpperCase(joinType) == "RIGHT OUTER") {
+            joinResult = rightTable->leftOuterJoin(*leftTable, joinCondition, resultColumns);
+        } else if (toUpperCase(joinType) == "FULL" || toUpperCase(joinType) == "FULL OUTER") {
+            joinResult = leftTable->fullOuterJoin(*rightTable, joinCondition, resultColumns);
+        } else if (toUpperCase(joinType) == "NATURAL") {
+            joinResult = leftTable->naturalJoin(*rightTable, resultColumns);
+        } else {
+            // Default to inner join
+            joinResult = leftTable->innerJoin(*rightTable, joinCondition, resultColumns);
+        }
+        
+        // Print results
         for (const auto& row : joinResult) {
-            for (const auto& procCol : processedDisplayColumns) {
-                auto it = std::find(combinedHeader.begin(), combinedHeader.end(), procCol);
-                if (it != combinedHeader.end()) {
-                    int idx = std::distance(combinedHeader.begin(), it);
-                    std::cout << row[idx] << "\t";
-                }
+            for (const auto& value : row) {
+                std::cout << value << "\t";
             }
             std::cout << std::endl;
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 void Database::deleteRecords(const std::string& tableName, const std::string& condition) {
     std::string lowerName = toLowerCase(tableName);
@@ -303,56 +375,100 @@ void Database::showTables() {
 }
 
 // Transaction functions
+// In Database.cpp, fix the beginTransaction method
+// Fix for Database.cpp: beginTransaction method
 Transaction* Database::beginTransaction() {
-    if (!inTransaction) {
-        // Deep copy tables
-        backupTables.clear();
-        for (const auto& [name, tablePtr] : tables) {
-            // Create a new table with the same name
-            auto tableCopy = std::make_unique<Table>(tablePtr->getName());
-            // Copy columns, rows, constraints, etc. as needed
-            // This depends on having copy methods in your Table class
-            
-            backupTables[name] = std::move(tableCopy);
-        }
-        inTransaction = true;
-        std::cout << "Transaction started." << std::endl;
-        std::cout << std::flush;
-        return new Transaction(this);
-    }  // Pass 'this' as the database pointer
-    else {
+    std::unique_lock<std::mutex> lock(databaseMutex);
+    std::cout << "Debug: beginTransaction called. Current inTransaction state: " 
+              << (inTransaction ? "true" : "false") << std::endl;
+    
+    if (inTransaction) {
         std::cout << "Transaction already in progress." << std::endl;
-        std::cout << std::flush;
         return nullptr;
     }
+    
+    // Set transaction flag
+    inTransaction = true;
+    
+    // Create backup of tables for potential rollback
+    backupTables.clear();
+    for (const auto& [name, tablePtr] : tables) {
+        auto tableCopy = std::make_unique<Table>(tablePtr->getName());
+        
+        // Copy columns and constraints
+        const auto& columns = tablePtr->getColumns();
+        const auto& columnTypes = tablePtr->getColumnTypes();
+        const auto& notNullConstraints = tablePtr->getNotNullConstraints();
+        
+        for (size_t i = 0; i < columns.size(); ++i) {
+            tableCopy->addColumn(columns[i], columnTypes[i], notNullConstraints[i]);
+        }
+        
+        // Copy constraints
+        for (const auto& constraint : tablePtr->getConstraints()) {
+            tableCopy->addConstraint(constraint);
+        }
+        
+        // Copy rows
+        for (const auto& row : tablePtr->getRows()) {
+            tableCopy->addRow(row);
+        }
+        
+        backupTables[name] = std::move(tableCopy);
+    }
+    
+    std::cout << "Transaction started." << std::endl;
+    return nullptr;  // We're not actually creating Transaction objects
 }
 
+// Fix for commitTransaction
 Transaction* Database::commitTransaction() {
+    std::unique_lock<std::mutex> lock(databaseMutex);
+    std::cout << "Debug: commitTransaction called. Current inTransaction state: " 
+              << (inTransaction ? "true" : "false") << std::endl;
+    
     if (!inTransaction) {
-       std::cout << "No active transaction to commit." << std::endl;
-       std::cout << std::flush;
-       return nullptr;
+        std::cout << "Error: No active transaction to commit" << std::endl;
+        return nullptr;
     }
-    inTransaction = false;
+    
+    // On commit, we just discard the backups
     backupTables.clear();
+    
+    // Clear transaction flag
+    inTransaction = false;
+    
     std::cout << "Transaction committed." << std::endl;
-    std::cout << std::flush;
     return nullptr;
 }
 
+// Fix for rollbackTransaction
 Transaction* Database::rollbackTransaction() {
+    std::unique_lock<std::mutex> lock(databaseMutex);
+    std::cout << "Debug: rollbackTransaction called. Current inTransaction state: " 
+              << (inTransaction ? "true" : "false") << std::endl;
     if (!inTransaction) {
-       std::cout << "No active transaction to rollback." << std::endl;
-       std::cout << std::flush;
-       return nullptr;
+        std::cout << "Error: No active transaction to rollback" << std::endl;
+        return nullptr;
     }
+    
+    // Restore from backups
     tables = std::move(backupTables);
     backupTables.clear();
+    
+    // Clear transaction flag
     inTransaction = false;
+    
     std::cout << "Transaction rolled back." << std::endl;
-    std::cout << std::flush;
     return nullptr;
 }
+
+
+
+
+
+
+
 
 // New functionalities
 
@@ -1003,4 +1119,39 @@ Table* Database::getTable(const std::string& tableName, bool exclusiveLock) {
 // Schema information
 void Database::showSchema() {
     catalog.showSchema();
+}
+void Database::showViews() {
+    std::cout << "Available Views:" << std::endl;
+    for (const auto& pair : views) {
+        std::cout << pair.first << std::endl;
+    }
+}
+std::vector<std::vector<std::string>> Database::executeViewQuery(const std::string& viewName) {
+    std::string lowerName = toLowerCase(viewName);
+    if (views.find(lowerName) == views.end()) {
+        throw DatabaseException("View '" + viewName + "' does not exist");
+    }
+    
+    // Parse the view definition (which should be a SELECT query)
+    Parser parser;
+    Query query = parser.parseQuery(views[lowerName]);
+    
+    if (toUpperCase(query.type) != "SELECT") {
+        throw DatabaseException("Invalid view definition");
+    }
+    
+    // Execute the query against the database
+    std::string tableName = query.tableName;
+    std::string lowerTableName = toLowerCase(tableName);
+    
+    if (tables.find(lowerTableName) == tables.end()) {
+        throw DatabaseException("Table '" + tableName + "' referenced in view does not exist");
+    }
+    
+    return tables[lowerTableName]->selectRows(
+        query.selectColumns,
+        query.condition,
+        query.orderByColumns,
+        query.groupByColumns,
+        query.havingCondition);
 }

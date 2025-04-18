@@ -35,6 +35,8 @@ Transaction* commitTransaction();
     void describeTable(const std::string& tableName);
 
     // DML operations
+    // Add this to the Database class declaration in database.h
+    std::vector<std::vector<std::string>> executeViewQuery(const std::string& viewName);
     void insertRecord(const std::string& tableName, const std::vector<std::vector<std::string>>& values);
     void selectRecords(const std::string& tableName,
         const std::vector<std::string>& selectColumns,
@@ -44,7 +46,8 @@ Transaction* commitTransaction();
         const std::string& havingCondition,
         bool isJoin = false,
         const std::string& joinTable = "",
-        const std::string& joinCondition = "");
+        const std::string& joinCondition = "",
+        const std::string& joinType = "INNER");
     void deleteRecords(const std::string& tableName, const std::string& condition);
     void updateRecords(const std::string& tableName,
                        const std::vector<std::pair<std::string, std::string>>& updates,
@@ -114,6 +117,7 @@ Transaction* commitTransaction();
 
     // Catalog operations
     void showSchema();
+    void showViews(); 
     void showCatalog();
 
     // Get table reference (with appropriate locking)

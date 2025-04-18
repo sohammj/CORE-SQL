@@ -34,6 +34,8 @@ struct Constraint {
 
 class Table {
 public:
+    // Add this to the public section of the Table class declaration
+    std::string applyAggregateFunction(const std::string& function, const std::vector<std::string>& values);
     Table(const std::string& name);
     virtual ~Table() = default;
     
