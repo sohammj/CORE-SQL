@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include "ConditionParser.h"
 #include "Parser.h"
+Database* _g_db = nullptr;
 
 // Create table
 void Database::createTable(const std::string& tableName,
@@ -719,11 +720,14 @@ void Database::replaceInto(const std::string& tableName, const std::vector<std::
 // Add these implementations to Database.cpp
 
 Database::Database() {
-    // Initialize the catalog
-    catalog = Catalog();
-    
-    // Create admin user by default
-    users["admin"] = User("admin", "admin");
+// Set the global db pointer to this instance
+_g_db = this;
+
+// Initialize the catalog
+catalog = Catalog();
+
+// Create admin user by default
+users["admin"] = User("admin", "admin");
 }
 
 Database::~Database() {
@@ -1171,4 +1175,41 @@ std::vector<std::vector<std::string>> Database::executeViewQuery(const std::stri
         query.groupByColumns,
         query.havingCondition
     );
+}
+void Database::showUserPrivileges(const std::string& username) {
+    std::string lowerUser = toLowerCase(username);
+    if (users.find(lowerUser) == users.end()) {
+        std::cout << "User '" << username << "' does not exist." << std::endl;
+        return;
+    }
+    
+    User& user = users[lowerUser];
+    std::vector<Privilege> privileges = user.getAllPrivileges();
+    
+    if (privileges.empty()) {
+        std::cout << "User '" << username << "' has no privileges." << std::endl;
+        return;
+    }
+    
+    std::cout << "Privileges for user '" << username << "':" << std::endl;
+    for (const auto& privilege : privileges) {
+        std::cout << "  ";
+        
+        // Convert privilege type to string
+        std::string privType;
+        switch (privilege.type) {
+            case Privilege::Type::SELECT: privType = "SELECT"; break;
+            case Privilege::Type::INSERT: privType = "INSERT"; break;
+            case Privilege::Type::UPDATE: privType = "UPDATE"; break;
+            case Privilege::Type::DELETE: privType = "DELETE"; break;
+            case Privilege::Type::ALL:    privType = "ALL PRIVILEGES"; break;
+            default: privType = "UNKNOWN"; break;
+        }
+        
+        std::cout << privType << " ON " << privilege.objectName;
+        if (privilege.withGrantOption) {
+            std::cout << " WITH GRANT OPTION";
+        }
+        std::cout << std::endl;
+    }
 }

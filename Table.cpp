@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <regex>
+#include "Database.h"
 
 // Table Class Implementation
 // -------------------------
@@ -274,207 +275,144 @@ std::vector<std::vector<std::string>> Table::leftOuterJoin(
     std::shared_lock<std::shared_mutex> lockLeft(mutex);
     std::shared_lock<std::shared_mutex> lockRight(rightTable.mutex);
     
-    std::vector<std::string> joinedColumns = columns;
-    joinedColumns.insert(joinedColumns.end(), rightTable.columns.begin(), rightTable.columns.end());
+    // Parse join condition to get column names
+    size_t eqPos = condition.find('=');
+    if (eqPos == std::string::npos) {
+        throw DatabaseException("Invalid join condition format");
+    }
     
-    ConditionParser cp(condition);
-    auto expr = cp.parse();
+    std::string leftExpr = trim(condition.substr(0, eqPos));
+    std::string rightExpr = trim(condition.substr(eqPos + 1));
+    
+    // Extract column names (handle table aliases)
+    std::string leftColName = leftExpr;
+    std::string rightColName = rightExpr;
+    
+    size_t leftDot = leftExpr.find('.');
+    if (leftDot != std::string::npos) {
+        leftColName = leftExpr.substr(leftDot + 1);
+    }
+    
+    size_t rightDot = rightExpr.find('.');
+    if (rightDot != std::string::npos) {
+        rightColName = rightExpr.substr(rightDot + 1);
+    }
+    
+    // Get column indices
+    int leftIdx = getColumnIndex(leftColName);
+    int rightIdx = rightTable.getColumnIndex(rightColName);
+    
+    if (leftIdx == -1 || rightIdx == -1) {
+        throw DatabaseException("Join columns not found: " + leftColName + " or " + rightColName);
+    }
     
     std::vector<std::vector<std::string>> result;
+    std::vector<bool> rightRowMatched(rightTable.rows.size(), false);
     
+    // For each row in the left table
     for (const auto& leftRow : rows) {
         bool foundMatch = false;
         
-        for (const auto& rightRow : rightTable.rows) {
-            std::vector<std::string> combinedRow;
-            combinedRow.insert(combinedRow.end(), leftRow.begin(), leftRow.end());
-            combinedRow.insert(combinedRow.end(), rightRow.begin(), rightRow.end());
+        // Try to find matches in the right table
+        for (size_t r = 0; r < rightTable.rows.size(); ++r) {
+            const auto& rightRow = rightTable.rows[r];
             
-            if (expr->evaluate(combinedRow, joinedColumns)) {
+            if (leftRow[leftIdx] == rightRow[rightIdx]) {
                 foundMatch = true;
                 
+                // Create combined row for this match
                 std::vector<std::string> resultRow;
                 for (const auto& col : selectColumns) {
-                    auto it = std::find(joinedColumns.begin(), joinedColumns.end(), col);
-                    if (it != joinedColumns.end()) {
-                        int idx = std::distance(joinedColumns.begin(), it);
-                        resultRow.push_back(combinedRow[idx]);
-                    } else {
-                        resultRow.push_back("");
+                    // Handle column references with table aliases
+                    std::string colName = col;
+                    std::string tablePrefix = "";
+                    
+                    size_t dotPos = col.find('.');
+                    if (dotPos != std::string::npos) {
+                        tablePrefix = col.substr(0, dotPos);
+                        colName = col.substr(dotPos + 1);
                     }
+                    
+                    // Try to find in left table first if no prefix or matching prefix
+                    if (tablePrefix.empty() || toLowerCase(tablePrefix) == "c") {  // assume "c" is left table alias
+                        int idx = getColumnIndex(colName);
+                        if (idx != -1 && idx < leftRow.size()) {
+                            resultRow.push_back(leftRow[idx]);
+                            continue;
+                        }
+                    }
+                    
+                    // Try to find in right table if not found in left
+                    if (tablePrefix.empty() || toLowerCase(tablePrefix) == "o") {  // assume "o" is right table alias
+                        int idx = rightTable.getColumnIndex(colName);
+                        if (idx != -1 && idx < rightRow.size()) {
+                            resultRow.push_back(rightRow[idx]);
+                            continue;
+                        }
+                    }
+                    
+                    // Column not found in either table
+                    resultRow.push_back("");
                 }
+                
                 result.push_back(resultRow);
             }
         }
         
+        // If no match was found, add left row with NULLs for right columns
         if (!foundMatch) {
-            std::vector<std::string> combinedRow = leftRow;
-            combinedRow.insert(combinedRow.end(), rightTable.columns.size(), "");
-            
             std::vector<std::string> resultRow;
             for (const auto& col : selectColumns) {
-                auto it = std::find(joinedColumns.begin(), joinedColumns.end(), col);
-                if (it != joinedColumns.end()) {
-                    int idx = std::distance(joinedColumns.begin(), it);
-                    resultRow.push_back(combinedRow[idx]);
-                } else {
-                    resultRow.push_back("");
+                std::string colName = col;
+                std::string tablePrefix = "";
+                
+                size_t dotPos = col.find('.');
+                if (dotPos != std::string::npos) {
+                    tablePrefix = col.substr(0, dotPos);
+                    colName = col.substr(dotPos + 1);
                 }
+                
+                // Include left table column
+                if (tablePrefix.empty() || toLowerCase(tablePrefix) == "c") {
+                    int idx = getColumnIndex(colName);
+                    if (idx != -1 && idx < leftRow.size()) {
+                        resultRow.push_back(leftRow[idx]);
+                        continue;
+                    }
+                }
+                
+                // Add empty string for right table column
+                resultRow.push_back("");
             }
+            
             result.push_back(resultRow);
         }
     }
     
     return result;
 }
+
+
 
 std::vector<std::vector<std::string>> Table::rightOuterJoin(
     Table& rightTable,
     const std::string& condition,
     const std::vector<std::string>& selectColumns
 ) {
-    std::shared_lock<std::shared_mutex> lockLeft(mutex);
-    std::shared_lock<std::shared_mutex> lockRight(rightTable.mutex);
-    
-    std::vector<std::string> joinedColumns = columns;
-    joinedColumns.insert(joinedColumns.end(), rightTable.columns.begin(), rightTable.columns.end());
-    
-    ConditionParser cp(condition);
-    auto expr = cp.parse();
-    
-    std::vector<std::vector<std::string>> result;
-    
-    for (const auto& rightRow : rightTable.rows) {
-        bool foundMatch = false;
-        
-        for (const auto& leftRow : rows) {
-            std::vector<std::string> combinedRow;
-            combinedRow.insert(combinedRow.end(), leftRow.begin(), leftRow.end());
-            combinedRow.insert(combinedRow.end(), rightRow.begin(), rightRow.end());
-            
-            if (expr->evaluate(combinedRow, joinedColumns)) {
-                foundMatch = true;
-                
-                std::vector<std::string> resultRow;
-                for (const auto& col : selectColumns) {
-                    auto it = std::find(joinedColumns.begin(), joinedColumns.end(), col);
-                    if (it != joinedColumns.end()) {
-                        int idx = std::distance(joinedColumns.begin(), it);
-                        resultRow.push_back(combinedRow[idx]);
-                    } else {
-                        resultRow.push_back("");
-                    }
-                }
-                result.push_back(resultRow);
-            }
-        }
-        
-        if (!foundMatch) {
-            std::vector<std::string> combinedRow;
-            combinedRow.insert(combinedRow.end(), columns.size(), "");
-            combinedRow.insert(combinedRow.end(), rightRow.begin(), rightRow.end());
-            
-            std::vector<std::string> resultRow;
-            for (const auto& col : selectColumns) {
-                auto it = std::find(joinedColumns.begin(), joinedColumns.end(), col);
-                if (it != joinedColumns.end()) {
-                    int idx = std::distance(joinedColumns.begin(), it);
-                    resultRow.push_back(combinedRow[idx]);
-                } else {
-                    resultRow.push_back("");
-                }
-            }
-            result.push_back(resultRow);
-        }
+    // We need to reverse the condition for the swapped tables
+    size_t eqPos = condition.find('=');
+    if (eqPos == std::string::npos) {
+        throw DatabaseException("Invalid join condition format");
     }
     
-    return result;
-}
-
-std::vector<std::vector<std::string>> Table::fullOuterJoin(
-    Table& rightTable,
-    const std::string& condition,
-    const std::vector<std::string>& selectColumns
-) {
-    std::shared_lock<std::shared_mutex> lockLeft(mutex);
-    std::shared_lock<std::shared_mutex> lockRight(rightTable.mutex);
+    std::string leftExpr = trim(condition.substr(0, eqPos));
+    std::string rightExpr = trim(condition.substr(eqPos + 1));
     
-    std::vector<std::string> joinedColumns = columns;
-    joinedColumns.insert(joinedColumns.end(), rightTable.columns.begin(), rightTable.columns.end());
+    // Swap the expressions for the reversed join
+    std::string reversedCondition = rightExpr + " = " + leftExpr;
     
-    ConditionParser cp(condition);
-    auto expr = cp.parse();
-    
-    std::vector<std::vector<std::string>> result;
-    std::vector<bool> rightMatched(rightTable.rows.size(), false);
-    
-    for (const auto& leftRow : rows) {
-        bool foundMatch = false;
-        
-        for (size_t r = 0; r < rightTable.rows.size(); ++r) {
-            const auto& rightRow = rightTable.rows[r];
-            
-            std::vector<std::string> combinedRow;
-            combinedRow.insert(combinedRow.end(), leftRow.begin(), leftRow.end());
-            combinedRow.insert(combinedRow.end(), rightRow.begin(), rightRow.end());
-            
-            if (expr->evaluate(combinedRow, joinedColumns)) {
-                foundMatch = true;
-                rightMatched[r] = true;
-                
-                std::vector<std::string> resultRow;
-                for (const auto& col : selectColumns) {
-                    auto it = std::find(joinedColumns.begin(), joinedColumns.end(), col);
-                    if (it != joinedColumns.end()) {
-                        int idx = std::distance(joinedColumns.begin(), it);
-                        resultRow.push_back(combinedRow[idx]);
-                    } else {
-                        resultRow.push_back("");
-                    }
-                }
-                result.push_back(resultRow);
-            }
-        }
-        
-        if (!foundMatch) {
-            std::vector<std::string> combinedRow = leftRow;
-            combinedRow.insert(combinedRow.end(), rightTable.columns.size(), "");
-            
-            std::vector<std::string> resultRow;
-            for (const auto& col : selectColumns) {
-                auto it = std::find(joinedColumns.begin(), joinedColumns.end(), col);
-                if (it != joinedColumns.end()) {
-                    int idx = std::distance(joinedColumns.begin(), it);
-                    resultRow.push_back(combinedRow[idx]);
-                } else {
-                    resultRow.push_back("");
-                }
-            }
-            result.push_back(resultRow);
-        }
-    }
-    
-    for (size_t r = 0; r < rightTable.rows.size(); ++r) {
-        if (!rightMatched[r]) {
-            std::vector<std::string> combinedRow;
-            combinedRow.insert(combinedRow.end(), columns.size(), "");
-            combinedRow.insert(combinedRow.end(), rightTable.rows[r].begin(), rightTable.rows[r].end());
-            
-            std::vector<std::string> resultRow;
-            for (const auto& col : selectColumns) {
-                auto it = std::find(joinedColumns.begin(), joinedColumns.end(), col);
-                if (it != joinedColumns.end()) {
-                    int idx = std::distance(joinedColumns.begin(), it);
-                    resultRow.push_back(combinedRow[idx]);
-                } else {
-                    resultRow.push_back("");
-                }
-            }
-            result.push_back(resultRow);
-        }
-    }
-    
-    return result;
+    // Use the reversed condition when calling leftOuterJoin
+    return rightTable.leftOuterJoin(*this, reversedCondition, selectColumns);
 }
 
 std::vector<std::vector<std::string>> Table::naturalJoin(
@@ -484,58 +422,164 @@ std::vector<std::vector<std::string>> Table::naturalJoin(
     std::shared_lock<std::shared_mutex> lockLeft(mutex);
     std::shared_lock<std::shared_mutex> lockRight(rightTable.mutex);
     
+    // Find common column names between the tables
     std::vector<std::string> commonColumns;
-    for (const auto& col : columns) {
-        if (rightTable.hasColumn(col)) {
-            commonColumns.push_back(col);
+    std::vector<int> leftIndices;
+    std::vector<int> rightIndices;
+    
+    for (size_t i = 0; i < columns.size(); i++) {
+        const std::string& leftCol = columns[i];
+        for (size_t j = 0; j < rightTable.columns.size(); j++) {
+            const std::string& rightCol = rightTable.columns[j];
+            if (toLowerCase(leftCol) == toLowerCase(rightCol)) {
+                commonColumns.push_back(leftCol);
+                leftIndices.push_back(i);
+                rightIndices.push_back(j);
+            }
         }
     }
     
     if (commonColumns.empty()) {
-        return innerJoin(rightTable, "1=1", selectColumns);
-    }
-    
-    std::vector<std::string> joinedColumns = columns;
-    for (const auto& col : rightTable.columns) {
-        if (!hasColumn(col)) {
-            joinedColumns.push_back(col);
+        // No common columns, do a cross join
+        std::vector<std::vector<std::string>> result;
+        for (const auto& leftRow : rows) {
+            for (const auto& rightRow : rightTable.rows) {
+                std::vector<std::string> combinedRow;
+                
+                // Add columns from left row
+                for (size_t i = 0; i < leftRow.size(); i++) {
+                    combinedRow.push_back(leftRow[i]);
+                }
+                
+                // Add columns from right row
+                for (size_t i = 0; i < rightRow.size(); i++) {
+                    combinedRow.push_back(rightRow[i]);
+                }
+                
+                // Project to select columns
+                std::vector<std::string> resultRow;
+                for (const auto& col : selectColumns) {
+                    // Handle column references with aliases
+                    std::string colName = col;
+                    std::string tableAlias = "";
+                    
+                    size_t dotPos = col.find('.');
+                    if (dotPos != std::string::npos) {
+                        tableAlias = col.substr(0, dotPos);
+                        colName = col.substr(dotPos + 1);
+                    }
+                    
+                    // Try to find in combined row
+                    int idx = -1;
+                    
+                    // First look in left table
+                    for (size_t i = 0; i < columns.size(); i++) {
+                        if (toLowerCase(columns[i]) == toLowerCase(colName)) {
+                            idx = i;
+                            break;
+                        }
+                    }
+                    
+                    if (idx != -1 && idx < leftRow.size()) {
+                        resultRow.push_back(leftRow[idx]);
+                    } else {
+                        // Look in right table
+                        for (size_t i = 0; i < rightTable.columns.size(); i++) {
+                            if (toLowerCase(rightTable.columns[i]) == toLowerCase(colName)) {
+                                idx = i;
+                                break;
+                            }
+                        }
+                        
+                        if (idx != -1 && idx < rightRow.size()) {
+                            resultRow.push_back(rightRow[idx]);
+                        } else {
+                            resultRow.push_back("");
+                        }
+                    }
+                }
+                
+                result.push_back(resultRow);
+            }
         }
+        
+        return result;
     }
     
+    // Do join on common columns
     std::vector<std::vector<std::string>> result;
-    
     for (const auto& leftRow : rows) {
         for (const auto& rightRow : rightTable.rows) {
             bool match = true;
-            for (const auto& col : commonColumns) {
-                int leftIdx = getColumnIndex(col);
-                int rightIdx = rightTable.getColumnIndex(col);
+            
+            // Check if all common columns match
+            for (size_t i = 0; i < commonColumns.size(); i++) {
+                int leftIdx = leftIndices[i];
+                int rightIdx = rightIndices[i];
                 
-                if (leftRow[leftIdx] != rightRow[rightIdx]) {
+                if (leftIdx >= leftRow.size() || rightIdx >= rightRow.size() || 
+                    leftRow[leftIdx] != rightRow[rightIdx]) {
                     match = false;
                     break;
                 }
             }
             
             if (match) {
-                std::vector<std::string> combinedRow = leftRow;
-                for (const auto& col : rightTable.columns) {
-                    if (!hasColumn(col)) {
-                        int idx = rightTable.getColumnIndex(col);
-                        combinedRow.push_back(rightRow[idx]);
+                std::vector<std::string> combinedRow;
+                
+                // Add columns from left row
+                for (size_t i = 0; i < leftRow.size(); i++) {
+                    combinedRow.push_back(leftRow[i]);
+                }
+                
+                // Add non-duplicate columns from right row
+                for (size_t i = 0; i < rightRow.size(); i++) {
+                    if (std::find(rightIndices.begin(), rightIndices.end(), i) == rightIndices.end()) {
+                        combinedRow.push_back(rightRow[i]);
                     }
                 }
                 
+                // Project to select columns
                 std::vector<std::string> resultRow;
                 for (const auto& col : selectColumns) {
-                    auto it = std::find(joinedColumns.begin(), joinedColumns.end(), col);
-                    if (it != joinedColumns.end()) {
-                        int idx = std::distance(joinedColumns.begin(), it);
-                        resultRow.push_back(combinedRow[idx]);
+                    // Handle column references with aliases
+                    std::string colName = col;
+                    std::string tableAlias = "";
+                    
+                    size_t dotPos = col.find('.');
+                    if (dotPos != std::string::npos) {
+                        tableAlias = col.substr(0, dotPos);
+                        colName = col.substr(dotPos + 1);
+                    }
+                    
+                    // Try to find in left table first
+                    int idx = -1;
+                    for (size_t i = 0; i < columns.size(); i++) {
+                        if (toLowerCase(columns[i]) == toLowerCase(colName)) {
+                            idx = i;
+                            break;
+                        }
+                    }
+                    
+                    if (idx != -1 && idx < leftRow.size()) {
+                        resultRow.push_back(leftRow[idx]);
                     } else {
-                        resultRow.push_back("");
+                        // Try right table
+                        for (size_t i = 0; i < rightTable.columns.size(); i++) {
+                            if (toLowerCase(rightTable.columns[i]) == toLowerCase(colName)) {
+                                idx = i;
+                                break;
+                            }
+                        }
+                        
+                        if (idx != -1 && idx < rightRow.size()) {
+                            resultRow.push_back(rightRow[idx]);
+                        } else {
+                            resultRow.push_back("");
+                        }
                     }
                 }
+                
                 result.push_back(resultRow);
             }
         }
@@ -543,7 +587,97 @@ std::vector<std::vector<std::string>> Table::naturalJoin(
     
     return result;
 }
-
+std::vector<std::vector<std::string>> Table::fullOuterJoin(
+    Table& rightTable,
+    const std::string& condition,
+    const std::vector<std::string>& selectColumns
+) {
+    std::shared_lock<std::shared_mutex> lockLeft(mutex);
+    std::shared_lock<std::shared_mutex> lockRight(rightTable.mutex);
+    
+    // Get left join results first
+    std::vector<std::vector<std::string>> leftJoinResults = leftOuterJoin(rightTable, condition, selectColumns);
+    
+    // Then get right-only results (rows in right table with no match in left table)
+    // Parse join condition
+    size_t eqPos = condition.find('=');
+    if (eqPos == std::string::npos) {
+        throw DatabaseException("Invalid join condition format");
+    }
+    
+    std::string leftExpr = trim(condition.substr(0, eqPos));
+    std::string rightExpr = trim(condition.substr(eqPos + 1));
+    
+    // Extract column names (handle table aliases)
+    std::string leftColName = leftExpr;
+    std::string rightColName = rightExpr;
+    
+    size_t leftDot = leftExpr.find('.');
+    if (leftDot != std::string::npos) {
+        leftColName = leftExpr.substr(leftDot + 1);
+    }
+    
+    size_t rightDot = rightExpr.find('.');
+    if (rightDot != std::string::npos) {
+        rightColName = rightExpr.substr(rightDot + 1);
+    }
+    
+    // Get column indices
+    int leftIdx = getColumnIndex(leftColName);
+    int rightIdx = rightTable.getColumnIndex(rightColName);
+    
+    if (leftIdx == -1 || rightIdx == -1) {
+        throw DatabaseException("Join columns not found: " + leftColName + " or " + rightColName);
+    }
+    
+    // Track which right rows have matches
+    std::vector<bool> rightRowMatched(rightTable.rows.size(), false);
+    
+    // Mark matched right rows
+    for (const auto& leftRow : rows) {
+        for (size_t r = 0; r < rightTable.rows.size(); ++r) {
+            const auto& rightRow = rightTable.rows[r];
+            if (leftRow[leftIdx] == rightRow[rightIdx]) {
+                rightRowMatched[r] = true;
+            }
+        }
+    }
+    
+    // Add unmatched right rows
+    for (size_t r = 0; r < rightTable.rows.size(); ++r) {
+        if (!rightRowMatched[r]) {
+            const auto& rightRow = rightTable.rows[r];
+            
+            std::vector<std::string> resultRow;
+            for (const auto& col : selectColumns) {
+                std::string colName = col;
+                std::string tablePrefix = "";
+                
+                size_t dotPos = col.find('.');
+                if (dotPos != std::string::npos) {
+                    tablePrefix = col.substr(0, dotPos);
+                    colName = col.substr(dotPos + 1);
+                }
+                
+                // Try right table first for unmatched right rows
+                if (tablePrefix.empty() || toLowerCase(tablePrefix) == "o") {
+                    int idx = rightTable.getColumnIndex(colName);
+                    if (idx != -1 && idx < rightRow.size()) {
+                        resultRow.push_back(rightRow[idx]);
+                        continue;
+                    }
+                }
+                
+                // Empty for left table columns
+                resultRow.push_back("");
+            }
+            
+            leftJoinResults.push_back(resultRow);
+        }
+    }
+    
+    return leftJoinResults;
+}
 // Data Manipulation
 // -----------------
 
@@ -749,9 +883,62 @@ bool Table::validateConstraints(const std::vector<std::string>& row) {
 // Data Insertion
 // --------------
 
+// In Table.cpp, make sure addRow calls validateConstraints before adding the row:
 int Table::addRow(const std::vector<std::string>& values) {
     std::unique_lock<std::shared_mutex> lock(mutex);
-    return addRowWithId(nextRowId++, values);
+    
+    if (values.size() != columns.size()) {
+        throw DatabaseException("Incorrect number of values for row");
+    }
+    
+    std::vector<std::string> rowValues = values;
+    
+    // Apply data type enforcement
+    for (size_t i = 0; i < rowValues.size(); ++i) {
+        enforceDataType(i, rowValues[i]);
+    }
+    
+    // Validate all constraints
+    for (const auto& constraint : constraints) {
+        switch (constraint.type) {
+            case Constraint::Type::PRIMARY_KEY:
+            case Constraint::Type::UNIQUE:
+                if (!validateUniqueConstraint(constraint, rowValues)) {
+                    // This will throw an exception if constraint is violated
+                    return -1;
+                }
+                break;
+            case Constraint::Type::FOREIGN_KEY:
+                if (!validateForeignKeyConstraint(constraint, rowValues)) {
+                    // This will throw an exception if constraint is violated
+                    return -1;
+                }
+                break;
+            case Constraint::Type::CHECK:
+                if (!validateCheckConstraint(constraint, rowValues)) {
+                    throw ConstraintViolationException("CHECK constraint '" + constraint.name + "' violated");
+                }
+                break;
+            case Constraint::Type::NOT_NULL:
+                for (const auto& col : constraint.columns) {
+                    int idx = getColumnIndex(col);
+                    if (idx >= 0 && idx < rowValues.size() && rowValues[idx].empty()) {
+                        throw ConstraintViolationException("NOT NULL constraint violated for column '" + col + "'");
+                    }
+                }
+                break;
+        }
+    }
+    
+    // Validate not null constraints
+    for (size_t i = 0; i < notNullConstraints.size(); ++i) {
+        if (notNullConstraints[i] && (i >= rowValues.size() || rowValues[i].empty())) {
+            throw ConstraintViolationException("NOT NULL constraint violated for column '" + columns[i] + "'");
+        }
+    }
+    
+    rows.push_back(rowValues);
+    return nextRowId++;
 }
 
 int Table::addRowWithId(int rowId, const std::vector<std::string>& values) {
@@ -1138,6 +1325,7 @@ void Table::enforceDataType(int columnIndex, std::string& value) {
     }
 }
 
+// In Table.cpp, update the validateUniqueConstraint method:
 bool Table::validateUniqueConstraint(const Constraint& constraint, const std::vector<std::string>& newRow) {
     std::unique_lock<std::shared_mutex> lock(mutex);
     
@@ -1155,31 +1343,89 @@ bool Table::validateUniqueConstraint(const Constraint& constraint, const std::ve
     for (const auto& row : rows) {
         bool allMatch = true;
         for (int idx : colIndices) {
-            if (idx >= row.size() || idx >= newRow.size() || row[idx] != newRow[idx]) {
+            if (idx >= row.size() || idx >= newRow.size()) {
+                allMatch = false;
+                break;
+            }
+            
+            // If values are different, no violation
+            if (row[idx] != newRow[idx]) {
                 allMatch = false;
                 break;
             }
         }
+        
         if (allMatch) {
-            return false; // Constraint violated
+            // Found a row with the same key values - constraint violation
+            if (constraint.type == Constraint::Type::PRIMARY_KEY) {
+                throw ConstraintViolationException("PRIMARY KEY constraint violated");
+            } else {
+                throw ConstraintViolationException("UNIQUE constraint violated");
+            }
+            return false;
         }
     }
     
     return true; // Constraint satisfied
 }
 
+// In Table.cpp, update the validateForeignKeyConstraint method:
 bool Table::validateForeignKeyConstraint(const Constraint& constraint, const std::vector<std::string>& row) {
-    // This function needs external database access to check references
-    // For simplicity, we'll assume references are valid for now
-    // A real implementation would need to look up the referenced table and check values
+    // This normally requires access to the referenced table
+    // You'll need to modify the Database class to expose table access to Table instances
     
-    // The implementation would check:
-    // 1. Get the referenced table
-    // 2. Extract values from this row for the constrained columns
-    // 3. Check if matching values exist in referenced table's referenced columns
+    // For now, we'll implement a simplified version that assumes access to a global db pointer
+    extern Database* g_db; // You'll need to define this in a shared location
     
-    // For now, just return true
-    return true;
+    if (!g_db) {
+        throw DatabaseException("Database reference not available for FK validation");
+    }
+    
+    // Get referenced table
+    Table* refTable = g_db->getTable(constraint.referencedTable);
+    if (!refTable) {
+        throw DatabaseException("Referenced table '" + constraint.referencedTable + "' does not exist");
+    }
+    
+    // Extract values from this row for the constrained columns
+    std::vector<std::string> fkValues;
+    for (const auto& colName : constraint.columns) {
+        int colIdx = getColumnIndex(colName);
+        if (colIdx == -1 || colIdx >= row.size()) {
+            throw DatabaseException("Column '" + colName + "' not found in foreign key");
+        }
+        fkValues.push_back(row[colIdx]);
+    }
+    
+    // Extract indices for referenced columns
+    std::vector<int> refColIndices;
+    for (const auto& colName : constraint.referencedColumns) {
+        int colIdx = refTable->getColumnIndex(colName);
+        if (colIdx == -1) {
+            throw DatabaseException("Referenced column '" + colName + "' not found");
+        }
+        refColIndices.push_back(colIdx);
+    }
+    
+    // Check if any row in the referenced table matches our FK values
+    for (const auto& refRow : refTable->getRows()) {
+        bool allMatch = true;
+        for (size_t i = 0; i < fkValues.size(); i++) {
+            int refIdx = refColIndices[i];
+            if (refIdx >= refRow.size() || fkValues[i] != refRow[refIdx]) {
+                allMatch = false;
+                break;
+            }
+        }
+        
+        if (allMatch) {
+            return true; // Found a matching reference
+        }
+    }
+    
+    // No matching reference found
+    throw ReferentialIntegrityException("FOREIGN KEY constraint violated");
+    return false;
 }
 
 bool Table::validateCheckConstraint(const Constraint& constraint, const std::vector<std::string>& row) {

@@ -7,6 +7,8 @@
 #include "Parser.h"
 #include "Utils.h"
 #include "Transaction.h"
+Database* g_db = nullptr;
+
 
 int main() {
     try {
@@ -357,13 +359,18 @@ int main() {
                         }
                     } else if (qType == "DESCRIBE") {
                         db.describeTable(query.tableName);
-                    } else if (qType == "SHOW") {
+                    }else if (qType == "SHOW") {
                         if (query.tableName == "TABLES") {
                             db.showTables();
                         } else if (query.tableName == "VIEWS") {
                             db.showViews();
                         } else if (query.tableName == "SCHEMA") {
                             db.showSchema();
+                        } else if (query.tableName.find("GRANTS FOR") == 0) {
+                            // Extract username from "GRANTS FOR username"
+                            std::string username = query.tableName.substr(10); // "GRANTS FOR " is 11 chars
+                            username = trim(username);
+                            db.showUserPrivileges(username);
                         } else {
                             db.showTables();
                         }

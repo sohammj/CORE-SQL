@@ -13,6 +13,7 @@
 #include "Catalog.h"
 #include "Transaction.h"
 #include "user.h"
+extern Database* _g_db;
 
 class Database {
 public:
@@ -84,7 +85,7 @@ Transaction* commitTransaction();
                         const std::string& privilege);
     bool checkPrivilege(const std::string& username, const std::string& tableName, 
                        const std::string& privilege);
-
+     void showUserPrivileges(const std::string& username);
     // Assertion management
     void createAssertion(const std::string& name, const std::string& condition);
     void dropAssertion(const std::string& name);
