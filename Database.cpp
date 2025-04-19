@@ -1132,15 +1132,14 @@ std::vector<std::vector<std::string>> Database::executeViewQuery(const std::stri
         throw DatabaseException("View '" + viewName + "' does not exist");
     }
     
-    // Parse the view definition (which should be a SELECT query)
+    // Get the view definition
+    std::string viewDef = views[lowerName];
+    
+    // Parse the view definition
     Parser parser;
-    Query query = parser.parseQuery(views[lowerName]);
+    Query query = parser.parseQuery(viewDef);
     
-    if (toUpperCase(query.type) != "SELECT") {
-        throw DatabaseException("Invalid view definition");
-    }
-    
-    // Execute the query against the database
+    // Execute the query
     std::string tableName = query.tableName;
     std::string lowerTableName = toLowerCase(tableName);
     
@@ -1148,10 +1147,28 @@ std::vector<std::vector<std::string>> Database::executeViewQuery(const std::stri
         throw DatabaseException("Table '" + tableName + "' referenced in view does not exist");
     }
     
+    // For JOIN queries
+    if (query.isJoin) {
+        std::string joinTable = query.joinTable;
+        std::string lowerJoinTable = toLowerCase(joinTable);
+        
+        if (tables.find(lowerJoinTable) == tables.end()) {
+            throw DatabaseException("Join table '" + joinTable + "' referenced in view does not exist");
+        }
+        
+        return tables[lowerTableName]->innerJoin(
+            *tables[lowerJoinTable],
+            query.joinCondition,
+            query.selectColumns
+        );
+    }
+    
+    // For regular queries
     return tables[lowerTableName]->selectRows(
         query.selectColumns,
         query.condition,
         query.orderByColumns,
         query.groupByColumns,
-        query.havingCondition);
+        query.havingCondition
+    );
 }

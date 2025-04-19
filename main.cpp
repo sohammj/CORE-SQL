@@ -378,7 +378,13 @@ int main() {
                     } else if (qType == "CREATEASSERTION") {
                         db.createAssertion(query.assertionName, query.assertionCondition);
                     } else if (qType == "GRANT") {
-                        db.grantPrivilege(query.username, query.tableName, query.privilege);
+                        if (query.multiplePrivileges) {
+                            for (const auto& privilege : query.privileges) {
+                                db.grantPrivilege(query.username, query.tableName, trim(privilege));
+                            }
+                        } else {
+                            db.grantPrivilege(query.username, query.tableName, query.privilege);
+                        }
                     } else if (qType == "REVOKE") {
                         db.revokePrivilege(query.username, query.tableName, query.privilege);
                     } else if (qType == "MERGE") {

@@ -791,11 +791,22 @@ Query Parser::parseGrant(const std::string& query) {
     Query q;
     q.type = "GRANT";
     
-    // Extract privilege
+    // Extract privileges
     std::regex privRegex(R"(GRANT\s+((?:SELECT|INSERT|UPDATE|DELETE|ALL)(?:\s*,\s*(?:SELECT|INSERT|UPDATE|DELETE|ALL))*))");
     std::smatch match;
-    if (std::regex_search(query, match, privRegex)) {
+    if (std::regex_search(query, match, privRegex) && match.size() > 1) {
         q.privilege = match[1];
+        
+        // Split multiple privileges and process them individually
+        std::string privStr = match[1];
+        std::vector<std::string> privileges = split(privStr, ',');
+        
+        if (privileges.size() > 1) {
+            q.multiplePrivileges = true;
+            q.privileges = privileges;
+        } else {
+            q.privilege = trim(privStr);
+        }
     }
     
     // Extract table name

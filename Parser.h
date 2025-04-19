@@ -71,7 +71,8 @@ struct Query {
     // Authorization
     std::string username;
     std::string privilege;
-    
+    bool multiplePrivileges = false;
+    std::vector<std::string> privileges;
     // Assertions
     std::string assertionName;
     std::string assertionCondition;
