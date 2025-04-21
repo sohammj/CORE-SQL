@@ -17,11 +17,20 @@ extern Database* _g_db;
 
 class Database {
 public:
+    // Add to the public section in Database.h
+    Table* getTablePtr(const std::string& tableName) {
+    std::string lowerName = toLowerCase(tableName);
+    auto it = tables.find(lowerName);
+    return (it != tables.end()) ? it->second.get() : nullptr;
+}
 Transaction* commitTransaction();
     Transaction* rollbackTransaction();
     Database();
     ~Database();
-    
+    void showIndexes();
+    // Add this in the public section of Database.h class definition:
+    void insertRecordDirect(const std::string& tableName, 
+    const std::vector<std::vector<std::string>>& values);
     // DDL operations
     void createTable(const std::string& tableName,
                      const std::vector<std::pair<std::string, std::string>>& columns,

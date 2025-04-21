@@ -966,17 +966,27 @@ std::pair<std::string, std::string> Parser::parseSetOperation(const std::string&
     std::pair<std::string, std::string> parts;
     
     // Find the set operation (UNION, INTERSECT, EXCEPT)
-    size_t opPos = query.find(" UNION ");
-    if (opPos == std::string::npos) {
-        opPos = query.find(" INTERSECT ");
-        if (opPos == std::string::npos) {
-            opPos = query.find(" EXCEPT ");
-        }
+    size_t unionPos = query.find(" UNION ");
+    size_t intersectPos = query.find(" INTERSECT ");
+    size_t exceptPos = query.find(" EXCEPT ");
+    
+    size_t opPos = std::string::npos;
+    size_t opLen = 0;
+    
+    if (unionPos != std::string::npos) {
+        opPos = unionPos;
+        opLen = 7; // Length of " UNION "
+    } else if (intersectPos != std::string::npos) {
+        opPos = intersectPos;
+        opLen = 11; // Length of " INTERSECT "
+    } else if (exceptPos != std::string::npos) {
+        opPos = exceptPos;
+        opLen = 8; // Length of " EXCEPT "
     }
     
     if (opPos != std::string::npos) {
         parts.first = query.substr(0, opPos);
-        parts.second = query.substr(opPos + 6); // Skip the operator (assuming 5 characters for EXCEPT)
+        parts.second = query.substr(opPos + opLen);
     }
     
     return parts;

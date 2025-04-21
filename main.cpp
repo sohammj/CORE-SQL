@@ -366,9 +366,11 @@ int main() {
                             db.showViews();
                         } else if (query.tableName == "SCHEMA") {
                             db.showSchema();
+                        } else if (query.tableName == "INDEXES") {
+                            db.showIndexes();
                         } else if (query.tableName.find("GRANTS FOR") == 0) {
                             // Extract username from "GRANTS FOR username"
-                            std::string username = query.tableName.substr(10); // "GRANTS FOR " is 11 chars
+                            std::string username = query.tableName.substr(10); // "GRANTS FOR " is 10 chars
                             username = trim(username);
                             db.showUserPrivileges(username);
                         } else {

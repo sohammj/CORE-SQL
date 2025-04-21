@@ -9,6 +9,90 @@
 #include "Parser.h"
 Database* _g_db = nullptr;
 
+
+// Add this at the top of Database.cpp after the includes
+bool validateForeignKeySimple(const Constraint& constraint, 
+    const std::vector<std::string>& row,
+    const std::vector<std::string>& sourceColumns,
+    std::unordered_map<std::string, std::unique_ptr<Table>>& tables) {
+
+std::cout << "Simple FK Validation: Starting" << std::endl;
+
+// Get the referenced table
+std::string lowerRefTable = toLowerCase(constraint.referencedTable);
+auto tableIt = tables.find(lowerRefTable);
+
+if (tableIt == tables.end()) {
+std::cout << "Simple FK Validation: Referenced table not found" << std::endl;
+return false;
+}
+
+Table* refTable = tableIt->second.get();
+if (!refTable) {
+std::cout << "Simple FK Validation: Referenced table pointer is null" << std::endl;
+return false;
+}
+
+// Extract FK values from the row
+std::vector<std::string> fkValues;
+for (const auto& colName : constraint.columns) {
+auto colIt = std::find(sourceColumns.begin(), sourceColumns.end(), colName);
+if (colIt == sourceColumns.end()) {
+std::cout << "Simple FK Validation: Column not found: " << colName << std::endl;
+return false;
+}
+
+int colIdx = std::distance(sourceColumns.begin(), colIt);
+if (colIdx >= row.size()) {
+std::cout << "Simple FK Validation: Column index out of range" << std::endl;
+return false;
+}
+
+// Allow NULL values in FK
+if (row[colIdx].empty() || toLowerCase(row[colIdx]) == "null") {
+std::cout << "Simple FK Validation: NULL value in FK (allowed)" << std::endl;
+return true;
+}
+
+fkValues.push_back(row[colIdx]);
+}
+
+// Get reference columns
+std::vector<int> refColIndices;
+for (const auto& colName : constraint.referencedColumns) {
+int colIdx = refTable->getColumnIndex(colName);
+if (colIdx == -1) {
+std::cout << "Simple FK Validation: Referenced column not found: " << colName << std::endl;
+return false;
+}
+refColIndices.push_back(colIdx);
+}
+
+// Check references
+const auto& refRows = refTable->getRows();
+std::cout << "Simple FK Validation: Checking " << refRows.size() << " rows in referenced table" << std::endl;
+
+for (const auto& refRow : refRows) {
+    bool match = true;
+
+for (size_t i = 0; i < fkValues.size(); i++) {
+    int refIdx = refColIndices[i];
+
+if (refIdx >= refRow.size() || fkValues[i] != refRow[refIdx]) {
+    match = false;
+    break;
+}
+}
+
+if (match) {
+    std::cout << "Simple FK Validation: Match found - constraint satisfied" << std::endl;
+return true;
+}
+}
+
+std::cout << "Simple FK Validation: No match found - constraint violated" << std::endl;
+return false;
+}
 // Create table
 void Database::createTable(const std::string& tableName,
     const std::vector<std::pair<std::string, std::string>>& cols,
@@ -118,20 +202,114 @@ void Database::describeTable(const std::string& tableName) {
     std::cout << std::endl;
 }
 
-void Database::insertRecord(const std::string& tableName,
-                              const std::vector<std::vector<std::string>>& values) {
+void Database::insertRecord(const std::string& tableName, const std::vector<std::vector<std::string>>& values) {
     std::string lowerName = toLowerCase(tableName);
     if (tables.find(lowerName) == tables.end()) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
         std::cout << std::flush;
         return;
     }
+    
+    // Get table pointer
+    Table* table = tables[lowerName].get();
+    std::cout << "Insert: Table pointer obtained" << std::endl;
+    
+    // Get constraints to manually validate FK constraints
+    const auto& constraints = table->getConstraints();
+    const auto& columns = table->getColumns();
+    
+    std::cout << "Insert: Got " << constraints.size() << " constraints" << std::endl;
+    
+    // Check each value set
     for (const auto& valueSet : values) {
-        tables[lowerName]->addRow(valueSet);
+        // Validate foreign key constraints before attempting to insert
+        bool fkValid = true;
+        for (const auto& constraint : constraints) {
+            if (constraint.type == Constraint::Type::FOREIGN_KEY) {
+                std::cout << "Insert: Validating FK constraint " << constraint.name << std::endl;
+                
+                // Use the direct validation function
+                if (!validateForeignKeySimple(constraint, valueSet, columns, tables)) {
+                    fkValid = false;
+                    std::cout << "Insert: FK constraint validation failed for " << constraint.name << std::endl;
+                    std::cout << "Error: Foreign key constraint violation - referenced value not found" << std::endl;
+                    break;
+                }
+            }
+        }
+        
+        if (fkValid) {
+            try {
+                // Proceed with normal insertion if FK checks passed
+                table->addRow(valueSet);
+                std::cout << "Insert: Row successfully added" << std::endl;
+            } catch (const std::exception& e) {
+                std::cout << "Error during insertion: " << e.what() << std::endl;
+            }
+        }
     }
+    
     std::cout << "Record(s) inserted into " << tableName << "." << std::endl;
     std::cout << std::flush;
 }
+
+
+
+
+
+
+
+
+
+
+void Database::insertRecordDirect(const std::string& tableName, const std::vector<std::vector<std::string>>& values) {
+    std::string lowerName = toLowerCase(tableName);
+    if (tables.find(lowerName) == tables.end()) {
+        std::cout << "Table " << tableName << " does not exist." << std::endl;
+        return;
+    }
+    
+    Table* table = tables[lowerName].get();
+    const auto& columns = table->getColumns();
+    
+    // For each set of values
+    for (const auto& valueSet : values) {
+        // Ensure correct number of values
+        if (valueSet.size() != columns.size()) {
+            std::cout << "Error: Incorrect number of values" << std::endl;
+            continue;
+        }
+        
+        // Create a new row directly, bypassing the validation
+        std::vector<std::string> newRow;
+        for (size_t i = 0; i < valueSet.size(); i++) {
+            newRow.push_back(valueSet[i]);
+        }
+        
+        // Add the row directly to the table
+        table->addRowDirect(newRow);
+    }
+    
+    std::cout << "Records directly inserted into " << tableName << "." << std::endl;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // In Database.cpp, fix the selectRecords method
 void Database::selectRecords(const std::string& tableName,
@@ -987,67 +1165,77 @@ void Database::validateReferences(const Constraint& constraint) {
 
 // Set operations
 void Database::setOperation(const std::string& operation, 
-                           const std::string& leftQuery, 
-                           const std::string& rightQuery) {
-    // Parse and execute both queries
-    Parser parser;
-    Query leftQ = parser.parseQuery(leftQuery);
-    Query rightQ = parser.parseQuery(rightQuery);
-    
-    // Get results from both queries
-    std::vector<std::vector<std::string>> leftResult;
-    std::vector<std::vector<std::string>> rightResult;
-    
-    // Execute left query
-    std::string lowerLeftTable = toLowerCase(leftQ.tableName);
-    if (tables.find(lowerLeftTable) == tables.end()) {
-        std::cout << "Table '" << leftQ.tableName << "' does not exist." << std::endl;
-        return;
-    }
-    
-    leftResult = tables[lowerLeftTable]->selectRows(
-        leftQ.selectColumns, leftQ.condition, 
-        leftQ.orderByColumns, leftQ.groupByColumns, leftQ.havingCondition);
-    
-    // Execute right query
-    std::string lowerRightTable = toLowerCase(rightQ.tableName);
-    if (tables.find(lowerRightTable) == tables.end()) {
-        std::cout << "Table '" << rightQ.tableName << "' does not exist." << std::endl;
-        return;
-    }
-    
-    rightResult = tables[lowerRightTable]->selectRows(
-        rightQ.selectColumns, rightQ.condition, 
-        rightQ.orderByColumns, rightQ.groupByColumns, rightQ.havingCondition);
-    
-    // Apply set operation
-    std::vector<std::vector<std::string>> result;
-    std::string upperOp = toUpperCase(operation);
-    
-    if (upperOp == "UNION") {
-        result = tables[lowerLeftTable]->setUnion(rightResult);
-    } else if (upperOp == "INTERSECT") {
-        result = tables[lowerLeftTable]->setIntersect(rightResult);
-    } else if (upperOp == "EXCEPT") {
-        result = tables[lowerLeftTable]->setExcept(rightResult);
-    } else {
-        std::cout << "Unsupported set operation: " << operation << std::endl;
-        return;
-    }
-    
-    // Display results
-    std::vector<std::string> displayColumns = leftQ.selectColumns;
-    for (const auto& col : displayColumns) {
-        std::cout << col << "\t";
-    }
-    std::cout << std::endl;
-    
-    for (const auto& row : result) {
-        for (const auto& cell : row) {
-            std::cout << cell << "\t";
-        }
-        std::cout << std::endl;
-    }
+    const std::string& leftQuery, 
+    const std::string& rightQuery) {
+// Parse and execute both queries
+Parser parser;
+
+try {
+// Parse the left query
+Query leftQ = parser.parseQuery(leftQuery);
+
+// Parse the right query
+Query rightQ = parser.parseQuery(rightQuery);
+
+// Get the table names
+std::string leftTableName = leftQ.tableName;
+std::string rightTableName = rightQ.tableName;
+
+// Check if tables exist
+std::string lowerLeftTable = toLowerCase(leftTableName);
+std::string lowerRightTable = toLowerCase(rightTableName);
+
+if (tables.find(lowerLeftTable) == tables.end()) {
+std::cout << "Table '" << leftTableName << "' does not exist." << std::endl;
+return;
+}
+
+if (tables.find(lowerRightTable) == tables.end()) {
+std::cout << "Table '" << rightTableName << "' does not exist." << std::endl;
+return;
+}
+
+// Execute left query
+std::vector<std::vector<std::string>> leftResult = tables[lowerLeftTable]->selectRows(
+leftQ.selectColumns, leftQ.condition, 
+leftQ.orderByColumns, leftQ.groupByColumns, leftQ.havingCondition);
+
+// Execute right query
+std::vector<std::vector<std::string>> rightResult = tables[lowerRightTable]->selectRows(
+rightQ.selectColumns, rightQ.condition, 
+rightQ.orderByColumns, rightQ.groupByColumns, rightQ.havingCondition);
+
+// Apply set operation
+std::vector<std::vector<std::string>> result;
+std::string upperOp = toUpperCase(operation);
+
+if (upperOp == "UNION") {
+result = tables[lowerLeftTable]->setUnion(rightResult);
+} else if (upperOp == "INTERSECT") {
+result = tables[lowerLeftTable]->setIntersect(rightResult);
+} else if (upperOp == "EXCEPT") {
+result = tables[lowerLeftTable]->setExcept(rightResult);
+} else {
+std::cout << "Unsupported set operation: " << operation << std::endl;
+return;
+}
+
+// Display headers - use left query's select columns
+for (const auto& col : leftQ.selectColumns) {
+std::cout << col << "\t";
+}
+std::cout << std::endl;
+
+// Display results
+for (const auto& row : result) {
+for (const auto& cell : row) {
+std::cout << cell << "\t";
+}
+std::cout << std::endl;
+}
+} catch (const std::exception& e) {
+std::cout << "Error executing set operation: " << e.what() << std::endl;
+}
 }
 
 // Join tables
@@ -1106,15 +1294,19 @@ Table* Database::getTable(const std::string& tableName, bool exclusiveLock) {
     std::string lowerName = toLowerCase(tableName);
     auto it = tables.find(lowerName);
     if (it == tables.end()) {
+        std::cout << "Debug: Table '" << tableName << "' not found in database" << std::endl;
         return nullptr;
     }
     
     Table* table = it->second.get();
     
-    if (exclusiveLock) {
-        table->lockExclusive();
-    } else {
-        table->lockShared();
+    // Apply locking only if requested
+    if (table) {
+        if (exclusiveLock) {
+            table->lockExclusive();
+        } else {
+            table->lockShared();
+        }
     }
     
     return table;
@@ -1211,5 +1403,12 @@ void Database::showUserPrivileges(const std::string& username) {
             std::cout << " WITH GRANT OPTION";
         }
         std::cout << std::endl;
+    }
+}
+void Database::showIndexes() {
+    std::cout << "Indexes:" << std::endl;
+    for (const auto& indexPair : indexes) {
+        std::cout << "  " << indexPair.first << " on " 
+                 << indexPair.second.first << "(" << indexPair.second.second << ")" << std::endl;
     }
 }

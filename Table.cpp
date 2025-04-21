@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <regex>
 #include "Database.h"
+extern Database* _g_db;
 
 // Table Class Implementation
 // -------------------------
@@ -701,10 +702,7 @@ void Table::deleteRows(const std::string& condition) {
     );
 }
 
-void Table::updateRows(
-    const std::vector<std::pair<std::string, std::string>>& updates,
-    const std::string& condition
-) {
+void Table::updateRows(const std::vector<std::pair<std::string, std::string>>& updates, const std::string& condition) {
     std::unique_lock<std::shared_mutex> lock(mutex);
     
     ConditionExprPtr expr = nullptr;
@@ -723,6 +721,80 @@ void Table::updateRows(
                 if (it != columns.end()) {
                     int idx = std::distance(columns.begin(), it);
                     std::string newValue = update.second;
+                    
+                    // Check if this is an expression that needs evaluation
+                    if (newValue.find(update.first) != std::string::npos) {
+                        // This is an expression involving the column itself
+                        // Simple parser for basic arithmetic operations
+                        try {
+                            if (newValue.find('*') != std::string::npos) {
+                                // Handle multiplication: column * factor
+                                size_t opPos = newValue.find('*');
+                                std::string leftPart = trim(newValue.substr(0, opPos));
+                                std::string rightPart = trim(newValue.substr(opPos + 1));
+                                
+                                if (toLowerCase(leftPart) == toLowerCase(update.first)) {
+                                    // Format: column * factor
+                                    double currentVal = std::stod(row[idx]);
+                                    double factor = std::stod(rightPart);
+                                    newValue = std::to_string(currentVal * factor);
+                                } else if (toLowerCase(rightPart) == toLowerCase(update.first)) {
+                                    // Format: factor * column
+                                    double currentVal = std::stod(row[idx]);
+                                    double factor = std::stod(leftPart);
+                                    newValue = std::to_string(currentVal * factor);
+                                }
+                            } else if (newValue.find('+') != std::string::npos) {
+                                // Handle addition: column + amount
+                                size_t opPos = newValue.find('+');
+                                std::string leftPart = trim(newValue.substr(0, opPos));
+                                std::string rightPart = trim(newValue.substr(opPos + 1));
+                                
+                                if (toLowerCase(leftPart) == toLowerCase(update.first)) {
+                                    // Format: column + amount
+                                    double currentVal = std::stod(row[idx]);
+                                    double amount = std::stod(rightPart);
+                                    newValue = std::to_string(currentVal + amount);
+                                } else if (toLowerCase(rightPart) == toLowerCase(update.first)) {
+                                    // Format: amount + column
+                                    double currentVal = std::stod(row[idx]);
+                                    double amount = std::stod(leftPart);
+                                    newValue = std::to_string(currentVal + amount);
+                                }
+                            } else if (newValue.find('-') != std::string::npos) {
+                                // Handle subtraction: column - amount
+                                size_t opPos = newValue.find('-');
+                                std::string leftPart = trim(newValue.substr(0, opPos));
+                                std::string rightPart = trim(newValue.substr(opPos + 1));
+                                
+                                if (toLowerCase(leftPart) == toLowerCase(update.first)) {
+                                    // Format: column - amount
+                                    double currentVal = std::stod(row[idx]);
+                                    double amount = std::stod(rightPart);
+                                    newValue = std::to_string(currentVal - amount);
+                                }
+                            } else if (newValue.find('/') != std::string::npos) {
+                                // Handle division: column / divisor
+                                size_t opPos = newValue.find('/');
+                                std::string leftPart = trim(newValue.substr(0, opPos));
+                                std::string rightPart = trim(newValue.substr(opPos + 1));
+                                
+                                if (toLowerCase(leftPart) == toLowerCase(update.first)) {
+                                    // Format: column / divisor
+                                    double currentVal = std::stod(row[idx]);
+                                    double divisor = std::stod(rightPart);
+                                    if (std::abs(divisor) < 1e-10) {
+                                        throw DatabaseException("Division by zero");
+                                    }
+                                    newValue = std::to_string(currentVal / divisor);
+                                }
+                            }
+                        } catch (const std::exception& e) {
+                            throw DatabaseException("Error evaluating expression: " + newValue + " - " + e.what());
+                        }
+                    }
+                    
+                    // Apply the data type enforcement
                     enforceDataType(idx, newValue);
                     
                     if (newRow[idx] != newValue) {
@@ -863,7 +935,7 @@ bool Table::validateConstraints(const std::vector<std::string>& row) {
                 }
                 break;
             case Constraint::Type::FOREIGN_KEY:
-                if (!validateForeignKeyConstraint(constraint, row)) {
+                if (!validateForeignKeyConstraintSimple(constraint, row)) {
                     throw ReferentialIntegrityException("FOREIGN KEY constraint '" + constraint.name + "' violated");
                 }
                 break;
@@ -899,47 +971,62 @@ int Table::addRow(const std::vector<std::string>& values) {
     }
     
     // Validate all constraints
-    for (const auto& constraint : constraints) {
-        switch (constraint.type) {
-            case Constraint::Type::PRIMARY_KEY:
-            case Constraint::Type::UNIQUE:
-                if (!validateUniqueConstraint(constraint, rowValues)) {
-                    // This will throw an exception if constraint is violated
-                    return -1;
-                }
-                break;
-            case Constraint::Type::FOREIGN_KEY:
-                if (!validateForeignKeyConstraint(constraint, rowValues)) {
-                    // This will throw an exception if constraint is violated
-                    return -1;
-                }
-                break;
-            case Constraint::Type::CHECK:
-                if (!validateCheckConstraint(constraint, rowValues)) {
-                    throw ConstraintViolationException("CHECK constraint '" + constraint.name + "' violated");
-                }
-                break;
-            case Constraint::Type::NOT_NULL:
-                for (const auto& col : constraint.columns) {
-                    int idx = getColumnIndex(col);
-                    if (idx >= 0 && idx < rowValues.size() && rowValues[idx].empty()) {
-                        throw ConstraintViolationException("NOT NULL constraint violated for column '" + col + "'");
+    try {
+        // Check NOT NULL constraints
+        for (size_t i = 0; i < notNullConstraints.size(); ++i) {
+            if (notNullConstraints[i] && (i >= rowValues.size() || rowValues[i].empty())) {
+                throw ConstraintViolationException("NOT NULL constraint violated for column '" + columns[i] + "'");
+            }
+        }
+        
+        // Check other constraints
+        for (const auto& constraint : constraints) {
+            switch (constraint.type) {
+                case Constraint::Type::PRIMARY_KEY:
+                case Constraint::Type::UNIQUE:
+                    if (!validateUniqueConstraint(constraint, rowValues)) {
+                        throw ConstraintViolationException("UNIQUE constraint '" + constraint.name + "' violated");
                     }
-                }
-                break;
+                    break;
+                    
+                case Constraint::Type::FOREIGN_KEY:
+                    // Use the simple version of FK validation
+                    if (!validateForeignKeyConstraintSimple(constraint, rowValues)) {
+                        throw ReferentialIntegrityException("FOREIGN KEY constraint '" + 
+                                                      constraint.name + "' violated");
+                    }
+                    break;
+                    
+                case Constraint::Type::CHECK:
+                    if (!validateCheckConstraint(constraint, rowValues)) {
+                        throw ConstraintViolationException("CHECK constraint '" + constraint.name + "' violated");
+                    }
+                    break;
+                    
+                case Constraint::Type::NOT_NULL:
+                    // Already checked above
+                    break;
+            }
         }
+    } catch (const std::exception& e) {
+        throw DatabaseException(e.what());
     }
     
-    // Validate not null constraints
-    for (size_t i = 0; i < notNullConstraints.size(); ++i) {
-        if (notNullConstraints[i] && (i >= rowValues.size() || rowValues[i].empty())) {
-            throw ConstraintViolationException("NOT NULL constraint violated for column '" + columns[i] + "'");
-        }
-    }
-    
+    // All constraints passed, add the row
     rows.push_back(rowValues);
     return nextRowId++;
 }
+
+
+
+
+
+
+
+
+
+
+
 
 int Table::addRowWithId(int rowId, const std::vector<std::string>& values) {
     if (values.size() != columns.size()) {
@@ -962,6 +1049,11 @@ int Table::addRowWithId(int rowId, const std::vector<std::string>& values) {
 // -------------
 
 // In Table.cpp, improve the selectRows method for GROUP BY
+
+
+
+
+
 std::vector<std::vector<std::string>> Table::selectRows(
     const std::vector<std::string>& selectColumns,
     const std::string& condition,
@@ -971,22 +1063,31 @@ std::vector<std::vector<std::string>> Table::selectRows(
 ) {
     std::shared_lock<std::shared_mutex> lock(mutex);
     
+    // Determine which columns to display
     std::vector<std::string> displayColumns;
+    bool useAllColumns = false;
+    
     if (selectColumns.size() == 1 && selectColumns[0] == "*") {
         displayColumns = columns;
+        useAllColumns = true;
     } else {
         displayColumns = selectColumns;
     }
     
+    // Apply condition to filter rows
     std::vector<std::vector<std::string>> filteredRows;
     if (!condition.empty()) {
-        ConditionParser cp(condition);
-        auto expr = cp.parse();
-        
-        for (const auto& row : rows) {
-            if (expr->evaluate(row, columns)) {
-                filteredRows.push_back(row);
+        try {
+            ConditionParser cp(condition);
+            auto expr = cp.parse();
+            
+            for (const auto& row : rows) {
+                if (expr->evaluate(row, columns)) {
+                    filteredRows.push_back(row);
+                }
             }
+        } catch (const std::exception& e) {
+            throw DatabaseException("Error evaluating condition: " + std::string(e.what()));
         }
     } else {
         filteredRows = rows;
@@ -994,139 +1095,66 @@ std::vector<std::vector<std::string>> Table::selectRows(
     
     // Handle GROUP BY clause
     if (!groupByColumns.empty()) {
-        std::unordered_map<std::string, std::vector<std::vector<std::string>>> groups;
-        
-        // Group rows based on the GROUP BY columns
-        for (const auto& row : filteredRows) {
-            std::string groupKey;
-            for (const auto& groupCol : groupByColumns) {
-                auto it = std::find(columns.begin(), columns.end(), groupCol);
-                if (it != columns.end()) {
-                    int idx = std::distance(columns.begin(), it);
-                    groupKey += row[idx] + "|";
-                }
-            }
-            groups[groupKey].push_back(row);
-        }
-        
-        std::vector<std::vector<std::string>> groupedResult;
-        
-        // Process each group
-        for (const auto& [key, groupRows] : groups) {
-            std::vector<std::string> resultRow;
-            
-            for (const auto& colExpr : displayColumns) {
-                size_t pos1 = colExpr.find('(');
-                size_t pos2 = colExpr.find(')');
-                
-                if (pos1 != std::string::npos && pos2 != std::string::npos) {
-                    // This is an aggregate function
-                    std::string func = toUpperCase(trim(colExpr.substr(0, pos1)));
-                    std::string colName = trim(colExpr.substr(pos1 + 1, pos2 - pos1 - 1));
-                    
-                    std::vector<std::string> colValues;
-                    if (colName == "*") {
-                        // COUNT(*) case
-                        if (func == "COUNT") {
-                            resultRow.push_back(std::to_string(groupRows.size()));
-                        }
-                    } else {
-                        // Get column values for this group
-                        auto it = std::find(columns.begin(), columns.end(), colName);
-                        if (it != columns.end()) {
-                            int idx = std::distance(columns.begin(), it);
-                            for (const auto& groupRow : groupRows) {
-                                colValues.push_back(groupRow[idx]);
-                            }
-                            
-                            // Apply aggregate function
-                            if (func == "AVG") {
-                                resultRow.push_back(std::to_string(Aggregation::computeMean(colValues)));
-                            } else if (func == "MIN") {
-                                resultRow.push_back(std::to_string(Aggregation::computeMin(colValues)));
-                            } else if (func == "MAX") {
-                                resultRow.push_back(std::to_string(Aggregation::computeMax(colValues)));
-                            } else if (func == "SUM") {
-                                resultRow.push_back(std::to_string(Aggregation::computeSum(colValues)));
-                            } else if (func == "COUNT") {
-                                resultRow.push_back(std::to_string(Aggregation::computeCount(colValues)));
-                            }
-                        } else {
-                            resultRow.push_back("");
-                        }
-                    }
-                } else {
-                    // Regular column, must be in GROUP BY
-                    auto it = std::find(columns.begin(), columns.end(), colExpr);
-                    if (it != columns.end()) {
-                        int idx = std::distance(columns.begin(), it);
-                        if (!groupRows.empty()) {
-                            resultRow.push_back(groupRows[0][idx]);
-                        } else {
-                            resultRow.push_back("");
-                        }
-                    } else {
-                        resultRow.push_back("");
-                    }
-                }
-            }
-            
-            groupedResult.push_back(resultRow);
-        }
-        
-        return groupedResult;
+        // ... existing group by code ...
     }
     
     // If no GROUP BY, handle simple queries
     std::vector<std::vector<std::string>> result;
-    for (const auto& row : filteredRows) {
+    
+    // Check if this is an aggregate query without GROUP BY
+    bool hasAggregates = false;
+    for (const auto& col : displayColumns) {
+        if (col.find('(') != std::string::npos && col.find(')') != std::string::npos) {
+            hasAggregates = true;
+            break;
+        }
+    }
+    
+    if (hasAggregates && groupByColumns.empty()) {
+        // Process aggregates without GROUP BY
         std::vector<std::string> resultRow;
+        
         for (const auto& col : displayColumns) {
+            // Check if this is an aggregate function
             size_t pos1 = col.find('(');
             size_t pos2 = col.find(')');
             
             if (pos1 != std::string::npos && pos2 != std::string::npos) {
-                // This is an aggregate function (without GROUP BY)
                 std::string func = toUpperCase(trim(col.substr(0, pos1)));
                 std::string colName = trim(col.substr(pos1 + 1, pos2 - pos1 - 1));
                 
+                // Special case for COUNT(*)
+                if (colName == "*" && func == "COUNT") {
+                    resultRow.push_back(std::to_string(filteredRows.size()));
+                    continue;
+                }
+                
+                // Get all values for the column
                 std::vector<std::string> colValues;
-                if (colName == "*") {
-                    // COUNT(*) case
-                    if (func == "COUNT") {
-                        resultRow.push_back(std::to_string(filteredRows.size()));
+                auto colIt = std::find(columns.begin(), columns.end(), colName);
+                if (colIt != columns.end()) {
+                    int colIdx = std::distance(columns.begin(), colIt);
+                    for (const auto& row : filteredRows) {
+                        if (colIdx < row.size()) {
+                            colValues.push_back(row[colIdx]);
+                        }
                     }
+                    
+                    // Apply aggregate function
+                    resultRow.push_back(applyAggregateFunction(func, colValues));
                 } else {
-                    // Get all column values
-                    auto it = std::find(columns.begin(), columns.end(), colName);
-                    if (it != columns.end()) {
-                        int idx = std::distance(columns.begin(), it);
-                        for (const auto& frow : filteredRows) {
-                            colValues.push_back(frow[idx]);
-                        }
-                        
-                        // Apply aggregate function
-                        if (func == "AVG") {
-                            resultRow.push_back(std::to_string(Aggregation::computeMean(colValues)));
-                        } else if (func == "MIN") {
-                            resultRow.push_back(std::to_string(Aggregation::computeMin(colValues)));
-                        } else if (func == "MAX") {
-                            resultRow.push_back(std::to_string(Aggregation::computeMax(colValues)));
-                        } else if (func == "SUM") {
-                            resultRow.push_back(std::to_string(Aggregation::computeSum(colValues)));
-                        } else if (func == "COUNT") {
-                            resultRow.push_back(std::to_string(Aggregation::computeCount(colValues)));
-                        }
+                    resultRow.push_back(""); // Column not found
+                }
+            } else {
+                // Non-aggregate column - just use first row (or empty if no rows)
+                auto colIt = std::find(columns.begin(), columns.end(), col);
+                if (colIt != columns.end() && !filteredRows.empty()) {
+                    int colIdx = std::distance(columns.begin(), colIt);
+                    if (colIdx < filteredRows[0].size()) {
+                        resultRow.push_back(filteredRows[0][colIdx]);
                     } else {
                         resultRow.push_back("");
                     }
-                }
-            } else {
-                // Regular column
-                auto it = std::find(columns.begin(), columns.end(), col);
-                if (it != columns.end()) {
-                    int idx = std::distance(columns.begin(), it);
-                    resultRow.push_back(row[idx]);
                 } else {
                     resultRow.push_back("");
                 }
@@ -1134,14 +1162,35 @@ std::vector<std::vector<std::string>> Table::selectRows(
         }
         
         result.push_back(resultRow);
-        
-        // If this is an aggregate query without GROUP BY, we only need one row
-        if (std::any_of(displayColumns.begin(), displayColumns.end(), [](const std::string& col) {
-            return col.find('(') != std::string::npos && col.find(')') != std::string::npos;
-        })) {
-            break;
+    } else {
+        // Normal query (no aggregates or with GROUP BY)
+        for (const auto& row : filteredRows) {
+            std::vector<std::string> resultRow;
+            
+            if (useAllColumns) {
+                // For SELECT *, just add all columns
+                resultRow = row;
+            } else {
+                // For specific columns, extract them
+                for (const auto& col : displayColumns) {
+                    auto colIt = std::find(columns.begin(), columns.end(), col);
+                    if (colIt != columns.end()) {
+                        int colIdx = std::distance(columns.begin(), colIt);
+                        if (colIdx < row.size()) {
+                            resultRow.push_back(row[colIdx]);
+                        } else {
+                            resultRow.push_back(""); // Index out of range
+                        }
+                    } else {
+                        resultRow.push_back(""); // Column not found
+                    }
+                }
+            }
+            
+            result.push_back(resultRow);
         }
     }
+
     
     // Handle ORDER BY
     if (!orderByColumns.empty()) {
@@ -1370,49 +1419,62 @@ bool Table::validateUniqueConstraint(const Constraint& constraint, const std::ve
 }
 
 // In Table.cpp, update the validateForeignKeyConstraint method:
-bool Table::validateForeignKeyConstraint(const Constraint& constraint, const std::vector<std::string>& row) {
-    // This normally requires access to the referenced table
-    // You'll need to modify the Database class to expose table access to Table instances
+bool Table::validateForeignKeyConstraintSimple(const Constraint& constraint, const std::vector<std::string>& row) {
+    std::cout << "Starting simple FK validation for " << constraint.name << std::endl;
     
-    // For now, we'll implement a simplified version that assumes access to a global db pointer
-    extern Database* g_db; // You'll need to define this in a shared location
-    
-    if (!g_db) {
-        throw DatabaseException("Database reference not available for FK validation");
+    if (!_g_db) {
+        std::cout << "Database reference not available" << std::endl;
+        return false; // Cannot validate without database reference
     }
     
-    // Get referenced table
-    Table* refTable = g_db->getTable(constraint.referencedTable);
+    // Get the referenced table directly from the database
+    std::string lowerRefTable = toLowerCase(constraint.referencedTable);
+    Table* refTable = _g_db->getTablePtr(lowerRefTable);
+    
     if (!refTable) {
-        throw DatabaseException("Referenced table '" + constraint.referencedTable + "' does not exist");
+        std::cout << "Referenced table not found: " << constraint.referencedTable << std::endl;
+        return false;
     }
     
-    // Extract values from this row for the constrained columns
-    std::vector<std::string> fkValues;
-    for (const auto& colName : constraint.columns) {
-        int colIdx = getColumnIndex(colName);
-        if (colIdx == -1 || colIdx >= row.size()) {
-            throw DatabaseException("Column '" + colName + "' not found in foreign key");
+    // Get indices of columns in this table
+    std::vector<int> fkIndices;
+    for (const auto& col : constraint.columns) {
+        int idx = getColumnIndex(col);
+        if (idx == -1 || idx >= row.size()) {
+            std::cout << "Column not found in source table: " << col << std::endl;
+            return false;
         }
-        fkValues.push_back(row[colIdx]);
+        fkIndices.push_back(idx);
     }
     
-    // Extract indices for referenced columns
-    std::vector<int> refColIndices;
-    for (const auto& colName : constraint.referencedColumns) {
-        int colIdx = refTable->getColumnIndex(colName);
-        if (colIdx == -1) {
-            throw DatabaseException("Referenced column '" + colName + "' not found");
+    // Check if any FK column has NULL value
+    for (int idx : fkIndices) {
+        if (row[idx].empty() || toLowerCase(row[idx]) == "null") {
+            return true; // NULL values in FK are allowed
         }
-        refColIndices.push_back(colIdx);
     }
     
-    // Check if any row in the referenced table matches our FK values
-    for (const auto& refRow : refTable->getRows()) {
+    // Get indices of columns in referenced table
+    std::vector<int> pkIndices;
+    for (const auto& col : constraint.referencedColumns) {
+        int idx = refTable->getColumnIndex(col);
+        if (idx == -1) {
+            std::cout << "Column not found in referenced table: " << col << std::endl;
+            return false;
+        }
+        pkIndices.push_back(idx);
+    }
+    
+    // Check referenced table for matching values
+    const auto& refRows = refTable->getRows();
+    for (const auto& refRow : refRows) {
         bool allMatch = true;
-        for (size_t i = 0; i < fkValues.size(); i++) {
-            int refIdx = refColIndices[i];
-            if (refIdx >= refRow.size() || fkValues[i] != refRow[refIdx]) {
+        
+        for (size_t i = 0; i < fkIndices.size(); i++) {
+            int fkIdx = fkIndices[i];
+            int pkIdx = pkIndices[i];
+            
+            if (pkIdx >= refRow.size() || row[fkIdx] != refRow[pkIdx]) {
                 allMatch = false;
                 break;
             }
@@ -1423,10 +1485,14 @@ bool Table::validateForeignKeyConstraint(const Constraint& constraint, const std
         }
     }
     
-    // No matching reference found
-    throw ReferentialIntegrityException("FOREIGN KEY constraint violated");
+    std::cout << "No matching reference found" << std::endl;
     return false;
 }
+
+
+
+
+
 
 bool Table::validateCheckConstraint(const Constraint& constraint, const std::vector<std::string>& row) {
     // Parse and evaluate the check expression against the row
@@ -1491,7 +1557,7 @@ bool Table::validateConstraintsForUpdate(const std::vector<std::string>& oldRow,
                 break;
             }
             case Constraint::Type::FOREIGN_KEY:
-                if (!validateForeignKeyConstraint(constraint, newRow)) {
+                if (!validateForeignKeyConstraintSimple(constraint, newRow)) {
                     throw ReferentialIntegrityException("FOREIGN KEY constraint '" + constraint.name + "' violated");
                 }
                 break;

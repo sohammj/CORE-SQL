@@ -34,6 +34,12 @@ struct Constraint {
 
 class Table {
 public:
+// Add to the private section of Table class:
+void addRowDirect(const std::vector<std::string>& values) {
+    std::unique_lock<std::shared_mutex> lock(mutex);
+    rows.push_back(values);
+    nextRowId++;
+}
     // Add this to the public section of the Table class declaration
     std::string applyAggregateFunction(const std::string& function, const std::vector<std::string>& values);
     Table(const std::string& name);
@@ -127,7 +133,7 @@ private:
     mutable std::shared_mutex mutex;
     
     // Helper methods
-    bool validateForeignKeyConstraint(const Constraint& constraint, const std::vector<std::string>& row);
+    bool validateForeignKeyConstraintSimple(const Constraint& constraint, const std::vector<std::string>& row);
     bool validateUniqueConstraint(const Constraint& constraint, const std::vector<std::string>& row);
     bool validateCheckConstraint(const Constraint& constraint, const std::vector<std::string>& row);
     bool validateNotNullConstraint(int columnIndex, const std::string& value);
