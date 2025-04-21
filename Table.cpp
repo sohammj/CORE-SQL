@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <regex>
 #include "Database.h"
+#include "ForeignKeyValidator.h" 
 extern Database* _g_db;
 
 // Table Class Implementation
@@ -1420,78 +1421,12 @@ bool Table::validateUniqueConstraint(const Constraint& constraint, const std::ve
 
 // In Table.cpp, update the validateForeignKeyConstraint method:
 bool Table::validateForeignKeyConstraintSimple(const Constraint& constraint, const std::vector<std::string>& row) {
-    std::cout << "Starting simple FK validation for " << constraint.name << std::endl;
-    
-    if (!_g_db) {
-        std::cout << "Database reference not available" << std::endl;
-        return false; // Cannot validate without database reference
-    }
-    
-    // Get the referenced table directly from the database
-    std::string lowerRefTable = toLowerCase(constraint.referencedTable);
-    Table* refTable = _g_db->getTablePtr(lowerRefTable);
-    
-    if (!refTable) {
-        std::cout << "Referenced table not found: " << constraint.referencedTable << std::endl;
-        return false;
-    }
-    
-    // Get indices of columns in this table
-    std::vector<int> fkIndices;
-    for (const auto& col : constraint.columns) {
-        int idx = getColumnIndex(col);
-        if (idx == -1 || idx >= row.size()) {
-            std::cout << "Column not found in source table: " << col << std::endl;
-            return false;
-        }
-        fkIndices.push_back(idx);
-    }
-    
-    // Check if any FK column has NULL value
-    for (int idx : fkIndices) {
-        if (row[idx].empty() || toLowerCase(row[idx]) == "null") {
-            return true; // NULL values in FK are allowed
-        }
-    }
-    
-    // Get indices of columns in referenced table
-    std::vector<int> pkIndices;
-    for (const auto& col : constraint.referencedColumns) {
-        int idx = refTable->getColumnIndex(col);
-        if (idx == -1) {
-            std::cout << "Column not found in referenced table: " << col << std::endl;
-            return false;
-        }
-        pkIndices.push_back(idx);
-    }
-    
-    // Check referenced table for matching values
-    const auto& refRows = refTable->getRows();
-    for (const auto& refRow : refRows) {
-        bool allMatch = true;
+    std::cout << "Starting FK validation for " << constraint.name << std::endl;
+    std::cout << std::flush;
         
-        for (size_t i = 0; i < fkIndices.size(); i++) {
-            int fkIdx = fkIndices[i];
-            int pkIdx = pkIndices[i];
-            
-            if (pkIdx >= refRow.size() || row[fkIdx] != refRow[pkIdx]) {
-                allMatch = false;
-                break;
-            }
-        }
-        
-        if (allMatch) {
-            return true; // Found a matching reference
-        }
-    }
-    
-    std::cout << "No matching reference found" << std::endl;
-    return false;
+    // Use the ForeignKeyValidator instead of direct Database access
+    return ForeignKeyValidator::getInstance().validateForeignKey(constraint, row, columns);
 }
-
-
-
-
 
 
 bool Table::validateCheckConstraint(const Constraint& constraint, const std::vector<std::string>& row) {

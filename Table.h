@@ -10,6 +10,9 @@
 #include <shared_mutex>
 #include "Utils.h"
 
+// Forward declaration
+class ForeignKeyValidator;
+
 // Structure to store table constraints
 struct Constraint {
     enum class Type {
@@ -34,12 +37,13 @@ struct Constraint {
 
 class Table {
 public:
-// Add to the private section of Table class:
-void addRowDirect(const std::vector<std::string>& values) {
-    std::unique_lock<std::shared_mutex> lock(mutex);
-    rows.push_back(values);
-    nextRowId++;
-}
+    // Direct row addition (bypass validation)
+    void addRowDirect(const std::vector<std::string>& values) {
+        std::unique_lock<std::shared_mutex> lock(mutex);
+        rows.push_back(values);
+        nextRowId++;
+    }
+    
     // Add this to the public section of the Table class declaration
     std::string applyAggregateFunction(const std::string& function, const std::vector<std::string>& values);
     Table(const std::string& name);
@@ -119,6 +123,7 @@ void addRowDirect(const std::vector<std::string>& values) {
     
     friend class Transaction;
     friend class Database;
+    friend class ForeignKeyValidator;
 
 private:
     std::string tableName;

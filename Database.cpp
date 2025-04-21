@@ -7,6 +7,8 @@
 #include <unordered_set>
 #include "ConditionParser.h"
 #include "Parser.h"
+#include "ForeignKeyValidator.h"
+
 Database* _g_db = nullptr;
 
 
@@ -94,6 +96,7 @@ std::cout << "Simple FK Validation: No match found - constraint violated" << std
 return false;
 }
 // Create table
+// Create table
 void Database::createTable(const std::string& tableName,
     const std::vector<std::pair<std::string, std::string>>& cols,
     const std::vector<Constraint>& constraints) {
@@ -142,22 +145,90 @@ void Database::createTable(const std::string& tableName,
         }
     }
     
+    // Get column names for registration
+    std::vector<std::string> columnNames;
+    for (const auto& col : cols) {
+        columnNames.push_back(col.first);
+    }
+    
+    // Create callback function for value existence check
+    auto valueExists = [this, lowerName](const std::string& columnName, const std::string& value) -> bool {
+        std::string condition = columnName + " = '" + value + "'";
+        std::vector<std::string> selectColumns = {columnName};
+        
+        try {
+            // Use a temporary lock to avoid deadlocks
+            Table* table;
+            {
+                std::lock_guard<std::mutex> tempLock(this->databaseMutex);
+                auto tableIt = this->tables.find(lowerName);
+                if (tableIt == this->tables.end()) return false;
+                table = tableIt->second.get();
+            }
+            
+            if (!table) return false;
+            
+            auto result = table->selectRows(selectColumns, condition);
+            return !result.empty();
+        } catch (const std::exception& e) {
+            std::cout << "Error in value check: " << e.what() << std::endl;
+            return false;
+        }
+    };
+    
+    // Create callback function for getting all rows
+    auto getAllRows = [this, lowerName]() -> std::vector<std::vector<std::string>> {
+        try {
+            // Use a temporary lock to avoid deadlocks
+            Table* table;
+            {
+                std::lock_guard<std::mutex> tempLock(this->databaseMutex);
+                auto tableIt = this->tables.find(lowerName);
+                if (tableIt == this->tables.end()) return {};
+                table = tableIt->second.get();
+            }
+            
+            if (!table) return {};
+            
+            // Return a copy of all rows
+            return table->getRows();
+        } catch (const std::exception& e) {
+            std::cout << "Error getting rows: " << e.what() << std::endl;
+            return {};
+        }
+    };
+    
     std::cout << "Debug: Adding table to collection" << std::endl;
     std::cout << std::flush;
+    
+    // Add table to tables map first
     tables[lowerName] = std::move(table);
+    
+    // Then register with FK validator
+    ForeignKeyValidator::getInstance().registerTable(tableName, columnNames, valueExists, getAllRows);
+    
     std::cout << "Table " << tableName << " created." << std::endl;
     std::cout << std::flush;
 }
 
+// Modify the dropTable method to unregister from FK validator
 void Database::dropTable(const std::string& tableName) {
     std::string lowerName = toLowerCase(tableName);
-    if (tables.erase(lowerName)){
+    
+    // Unregister from FK validator first
+    ForeignKeyValidator::getInstance().unregisterTable(tableName);
+    
+    // Then drop the table
+    if (tables.erase(lowerName)) {
         std::cout << "Table " << tableName << " dropped." << std::endl;
-        std::cout << std::flush;}
-    else{
+        std::cout << std::flush;
+    } else {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
-        std::cout << std::flush;}
+        std::cout << std::flush;
+    }
 }
+
+
 
 void Database::alterTableAddColumn(const std::string& tableName, const std::pair<std::string, std::string>& column, bool isNotNull) {
     std::string lowerName = toLowerCase(tableName);
@@ -212,44 +283,27 @@ void Database::insertRecord(const std::string& tableName, const std::vector<std:
     
     // Get table pointer
     Table* table = tables[lowerName].get();
-    std::cout << "Insert: Table pointer obtained" << std::endl;
     
-    // Get constraints to manually validate FK constraints
-    const auto& constraints = table->getConstraints();
-    const auto& columns = table->getColumns();
+    // Track successful insertions
+    int successCount = 0;
     
-    std::cout << "Insert: Got " << constraints.size() << " constraints" << std::endl;
-    
-    // Check each value set
+    // Insert each row
     for (const auto& valueSet : values) {
-        // Validate foreign key constraints before attempting to insert
-        bool fkValid = true;
-        for (const auto& constraint : constraints) {
-            if (constraint.type == Constraint::Type::FOREIGN_KEY) {
-                std::cout << "Insert: Validating FK constraint " << constraint.name << std::endl;
-                
-                // Use the direct validation function
-                if (!validateForeignKeySimple(constraint, valueSet, columns, tables)) {
-                    fkValid = false;
-                    std::cout << "Insert: FK constraint validation failed for " << constraint.name << std::endl;
-                    std::cout << "Error: Foreign key constraint violation - referenced value not found" << std::endl;
-                    break;
-                }
-            }
-        }
-        
-        if (fkValid) {
-            try {
-                // Proceed with normal insertion if FK checks passed
-                table->addRow(valueSet);
-                std::cout << "Insert: Row successfully added" << std::endl;
-            } catch (const std::exception& e) {
-                std::cout << "Error during insertion: " << e.what() << std::endl;
-            }
+        try {
+            std::cout << "Inserting row into " << tableName << std::endl;
+            table->addRow(valueSet);
+            std::cout << "Row successfully inserted" << std::endl;
+            successCount++;
+        } catch (const std::exception& e) {
+            std::cout << "Error during insertion: " << e.what() << std::endl;
         }
     }
     
-    std::cout << "Record(s) inserted into " << tableName << "." << std::endl;
+    if (successCount > 0) {
+        std::cout << successCount << " record(s) inserted into " << tableName << "." << std::endl;
+    } else {
+        std::cout << "No records were inserted into " << tableName << "." << std::endl;
+    }
     std::cout << std::flush;
 }
 
@@ -261,9 +315,10 @@ void Database::insertRecord(const std::string& tableName, const std::vector<std:
 
 
 
-
 void Database::insertRecordDirect(const std::string& tableName, const std::vector<std::vector<std::string>>& values) {
     std::string lowerName = toLowerCase(tableName);
+    std::cout << "Debug: Starting insertion into " << tableName << std::endl;
+
     if (tables.find(lowerName) == tables.end()) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
         return;
@@ -291,6 +346,7 @@ void Database::insertRecordDirect(const std::string& tableName, const std::vecto
     }
     
     std::cout << "Records directly inserted into " << tableName << "." << std::endl;
+    std::cout << "Debug: Insertion complete" << std::endl;
 }
 
 
@@ -556,6 +612,14 @@ void Database::showTables() {
 // Transaction functions
 // In Database.cpp, fix the beginTransaction method
 // Fix for Database.cpp: beginTransaction method
+
+
+
+
+
+
+
+// Begin Transaction
 Transaction* Database::beginTransaction() {
     std::unique_lock<std::mutex> lock(databaseMutex);
     std::cout << "Debug: beginTransaction called. Current inTransaction state: " 
@@ -574,7 +638,7 @@ Transaction* Database::beginTransaction() {
     for (const auto& [name, tablePtr] : tables) {
         auto tableCopy = std::make_unique<Table>(tablePtr->getName());
         
-        // Copy columns and constraints
+        // Copy columns and types without validation
         const auto& columns = tablePtr->getColumns();
         const auto& columnTypes = tablePtr->getColumnTypes();
         const auto& notNullConstraints = tablePtr->getNotNullConstraints();
@@ -583,14 +647,11 @@ Transaction* Database::beginTransaction() {
             tableCopy->addColumn(columns[i], columnTypes[i], notNullConstraints[i]);
         }
         
-        // Copy constraints
-        for (const auto& constraint : tablePtr->getConstraints()) {
-            tableCopy->addConstraint(constraint);
-        }
+        // Skip constraint copying during backup to avoid validation loops
         
-        // Copy rows
+        // Copy rows directly without validation
         for (const auto& row : tablePtr->getRows()) {
-            tableCopy->addRow(row);
+            tableCopy->addRowDirect(row);
         }
         
         backupTables[name] = std::move(tableCopy);
@@ -600,7 +661,7 @@ Transaction* Database::beginTransaction() {
     return nullptr;  // We're not actually creating Transaction objects
 }
 
-// Fix for commitTransaction
+// Commit Transaction
 Transaction* Database::commitTransaction() {
     std::unique_lock<std::mutex> lock(databaseMutex);
     std::cout << "Debug: commitTransaction called. Current inTransaction state: " 
@@ -621,18 +682,82 @@ Transaction* Database::commitTransaction() {
     return nullptr;
 }
 
-// Fix for rollbackTransaction
+// Rollback Transaction
+// Rollback Transaction
 Transaction* Database::rollbackTransaction() {
     std::unique_lock<std::mutex> lock(databaseMutex);
     std::cout << "Debug: rollbackTransaction called. Current inTransaction state: " 
               << (inTransaction ? "true" : "false") << std::endl;
+    
     if (!inTransaction) {
         std::cout << "Error: No active transaction to rollback" << std::endl;
         return nullptr;
     }
     
     // Restore from backups
-    tables = std::move(backupTables);
+    // We need to unregister each table from the FK validator first
+    for (const auto& pair : tables) {
+        ForeignKeyValidator::getInstance().unregisterTable(pair.second->getName());
+    }
+    
+    // Now restore from backups
+    tables.clear();
+    for (auto& pair : backupTables) {
+        std::string tableName = pair.second->getName();
+        std::string tableKey = pair.first;
+        std::vector<std::string> columnNames = pair.second->getColumns();
+        
+        // Move the table to the main tables collection first
+        tables[tableKey] = std::move(pair.second);
+        
+        // Create callback functions for the restored table using the key
+        auto valueExists = [this, tableKey](const std::string& columnName, const std::string& value) -> bool {
+            std::string condition = columnName + " = '" + value + "'";
+            std::vector<std::string> selectColumns = {columnName};
+            
+            try {
+                Table* table;
+                {
+                    std::lock_guard<std::mutex> tempLock(this->databaseMutex);
+                    auto tableIt = this->tables.find(tableKey);
+                    if (tableIt == this->tables.end()) return false;
+                    table = tableIt->second.get();
+                }
+                
+                if (!table) return false;
+                
+                auto result = table->selectRows(selectColumns, condition);
+                return !result.empty();
+            } catch (const std::exception& e) {
+                std::cout << "Error in value check: " << e.what() << std::endl;
+                return false;
+            }
+        };
+        
+        auto getAllRows = [this, tableKey]() -> std::vector<std::vector<std::string>> {
+            try {
+                Table* table;
+                {
+                    std::lock_guard<std::mutex> tempLock(this->databaseMutex);
+                    auto tableIt = this->tables.find(tableKey);
+                    if (tableIt == this->tables.end()) return {};
+                    table = tableIt->second.get();
+                }
+                
+                if (!table) return {};
+                
+                return table->getRows();
+            } catch (const std::exception& e) {
+                std::cout << "Error getting rows: " << e.what() << std::endl;
+                return {};
+            }
+        };
+        
+        // Register with FK validator
+        ForeignKeyValidator::getInstance().registerTable(tableName, columnNames, valueExists, getAllRows);
+    }
+    
+    // Clear backups
     backupTables.clear();
     
     // Clear transaction flag
@@ -898,14 +1023,14 @@ void Database::replaceInto(const std::string& tableName, const std::vector<std::
 // Add these implementations to Database.cpp
 
 Database::Database() {
-// Set the global db pointer to this instance
-_g_db = this;
+    // Set the global db pointer to this instance
+    _g_db = this;
 
-// Initialize the catalog
-catalog = Catalog();
+    // Initialize the catalog
+    catalog = Catalog();
 
-// Create admin user by default
-users["admin"] = User("admin", "admin");
+    // Create admin user by default
+    users["admin"] = User("admin", "admin");
 }
 
 Database::~Database() {
