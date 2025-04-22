@@ -1,0 +1,56 @@
+# System Requirements
+
+## Compiler Requirements
+- C++17 compatible compiler:
+  - GCC 7.0 or higher
+  - Clang 5.0 or higher
+  - MSVC 19.14 or higher (Visual Studio 2017 version 15.7 or later)
+- CMake 3.10 or higher (for building)
+
+## System Requirements
+- Operating System: 
+  - Linux (Ubuntu 18.04+, CentOS 7+)
+  - macOS 10.13+
+  - Windows 10+
+- RAM: 2GB minimum, 4GB+ recommended
+- Storage: 50MB free space for installation, plus space for databases
+- CPU: Dual-core processor minimum
+
+## Dependencies
+- Standard C++ Libraries only
+- No external database libraries required
+- No third-party dependencies
+
+## Build Tools (Optional)
+- Make (for Unix-based systems)
+- Ninja (alternative build system)
+- Git (for version control)
+
+## Developer Tools (Optional)
+- GDB or LLDB for debugging
+- Valgrind for memory analysis (Unix-based systems)
+- Visual Studio Code or other IDE with C++ support
+
+## Testing Requirements
+- Googletest (for unit tests)
+- CTest (integrated with CMake)
+
+## Performance Guidelines
+- Expected to handle up to 100,000 rows per table efficiently
+- Transaction processing: ~1,000 transactions per second
+- Query execution: Response time under 100ms for typical queries
+- Memory usage: Scales with database size, approximately 2x the raw data size
+
+## Scaling Limitations
+- Maximum database size: Limited primarily by system memory and disk space
+- Maximum table size: 2^32 rows (4.2 billion records)
+- Maximum row size: 64KB
+- Maximum columns per table: 256
+- Maximum indexes per table: 64
+- Maximum concurrent users: Depends on system resources, typically 100+
+
+## Recommended Hardware for Production Use
+- CPU: 4+ cores, 3.0+ GHz
+- RAM: 8GB+
+- Storage: SSD with 100GB+ free space
+- Network: 1 Gbps Ethernet (for networked deployments)

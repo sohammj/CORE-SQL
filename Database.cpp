@@ -100,12 +100,10 @@ return false;
 void Database::createTable(const std::string& tableName,
     const std::vector<std::pair<std::string, std::string>>& cols,
     const std::vector<Constraint>& constraints) {
-    
-    std::cout << "Debug: Starting creation of table " << tableName << " with " << cols.size() << " columns" << std::endl;
     std::cout << std::flush;
     
     std::unique_lock<std::mutex> lock(databaseMutex);
-    std::cout << "Debug: Acquired mutex lock" << std::endl;
+    
     std::cout << std::flush;
     
     std::string lowerName = toLowerCase(tableName);
@@ -113,33 +111,33 @@ void Database::createTable(const std::string& tableName,
         throw DatabaseException("Table '" + tableName + "' already exists");
     }
     
-    std::cout << "Debug: Table name check passed" << std::endl;
+    
     std::cout << std::flush;
     
     // Create the table using make_unique
     auto table = std::make_unique<Table>(tableName);
     
-    std::cout << "Debug: Table object created" << std::endl;
+    
     std::cout << std::flush;
     
     // Add columns
     for (const auto& col : cols) {
         table->addColumn(col.first, col.second);
-        std::cout << "Debug: Added column " << col.first << std::endl;
+      
         std::cout << std::flush;
     }
     
     // Add constraints
     for (const auto& constraint : constraints) {
         try {
-            std::cout << "Debug: Validating constraint" << std::endl;
+            
             std::cout << std::flush;
             validateReferences(constraint);
-            std::cout << "Debug: Adding constraint to table" << std::endl;
+            
             std::cout << std::flush;
             table->addConstraint(constraint);
         } catch (const DatabaseException& e) {
-            std::cout << "Debug: Constraint error: " << e.what() << std::endl;
+            
             std::cout << std::flush;
             throw DatabaseException("Failed to create table '" + tableName + "': " + e.what());
         }
@@ -198,7 +196,7 @@ void Database::createTable(const std::string& tableName,
         }
     };
     
-    std::cout << "Debug: Adding table to collection" << std::endl;
+   
     std::cout << std::flush;
     
     // Add table to tables map first
@@ -273,8 +271,12 @@ void Database::describeTable(const std::string& tableName) {
     std::cout << std::endl;
 }
 
+// Enhanced version with more debugging
 void Database::insertRecord(const std::string& tableName, const std::vector<std::vector<std::string>>& values) {
     std::string lowerName = toLowerCase(tableName);
+    
+    std::cout << std::flush;
+    
     if (tables.find(lowerName) == tables.end()) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
         std::cout << std::flush;
@@ -282,6 +284,8 @@ void Database::insertRecord(const std::string& tableName, const std::vector<std:
     }
     
     // Get table pointer
+    
+    std::cout << std::flush;
     Table* table = tables[lowerName].get();
     
     // Track successful insertions
@@ -290,14 +294,24 @@ void Database::insertRecord(const std::string& tableName, const std::vector<std:
     // Insert each row
     for (const auto& valueSet : values) {
         try {
+            
             std::cout << "Inserting row into " << tableName << std::endl;
+            std::cout << std::flush;
+            
             table->addRow(valueSet);
+            
+            
+            std::cout << std::flush;
             std::cout << "Row successfully inserted" << std::endl;
             successCount++;
         } catch (const std::exception& e) {
             std::cout << "Error during insertion: " << e.what() << std::endl;
+            std::cout << std::flush;
         }
     }
+    
+    
+    std::cout << std::flush;
     
     if (successCount > 0) {
         std::cout << successCount << " record(s) inserted into " << tableName << "." << std::endl;
@@ -314,10 +328,9 @@ void Database::insertRecord(const std::string& tableName, const std::vector<std:
 
 
 
-
 void Database::insertRecordDirect(const std::string& tableName, const std::vector<std::vector<std::string>>& values) {
     std::string lowerName = toLowerCase(tableName);
-    std::cout << "Debug: Starting insertion into " << tableName << std::endl;
+   
 
     if (tables.find(lowerName) == tables.end()) {
         std::cout << "Table " << tableName << " does not exist." << std::endl;
@@ -346,7 +359,7 @@ void Database::insertRecordDirect(const std::string& tableName, const std::vecto
     }
     
     std::cout << "Records directly inserted into " << tableName << "." << std::endl;
-    std::cout << "Debug: Insertion complete" << std::endl;
+    
 }
 
 
@@ -622,8 +635,6 @@ void Database::showTables() {
 // Begin Transaction
 Transaction* Database::beginTransaction() {
     std::unique_lock<std::mutex> lock(databaseMutex);
-    std::cout << "Debug: beginTransaction called. Current inTransaction state: " 
-              << (inTransaction ? "true" : "false") << std::endl;
     
     if (inTransaction) {
         std::cout << "Transaction already in progress." << std::endl;
@@ -664,8 +675,7 @@ Transaction* Database::beginTransaction() {
 // Commit Transaction
 Transaction* Database::commitTransaction() {
     std::unique_lock<std::mutex> lock(databaseMutex);
-    std::cout << "Debug: commitTransaction called. Current inTransaction state: " 
-              << (inTransaction ? "true" : "false") << std::endl;
+    
     
     if (!inTransaction) {
         std::cout << "Error: No active transaction to commit" << std::endl;
@@ -686,8 +696,7 @@ Transaction* Database::commitTransaction() {
 // Rollback Transaction
 Transaction* Database::rollbackTransaction() {
     std::unique_lock<std::mutex> lock(databaseMutex);
-    std::cout << "Debug: rollbackTransaction called. Current inTransaction state: " 
-              << (inTransaction ? "true" : "false") << std::endl;
+    
     
     if (!inTransaction) {
         std::cout << "Error: No active transaction to rollback" << std::endl;
@@ -1419,7 +1428,7 @@ Table* Database::getTable(const std::string& tableName, bool exclusiveLock) {
     std::string lowerName = toLowerCase(tableName);
     auto it = tables.find(lowerName);
     if (it == tables.end()) {
-        std::cout << "Debug: Table '" << tableName << "' not found in database" << std::endl;
+        
         return nullptr;
     }
     

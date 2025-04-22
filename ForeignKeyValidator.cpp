@@ -31,33 +31,52 @@ void ForeignKeyValidator::unregisterTable(const std::string& tableName) {
     std::cout << "FKValidator: Unregistered table " << tableName << std::endl;
 }
 
+// Modified with better debugging and deadlock prevention
 bool ForeignKeyValidator::validateForeignKey(
     const Constraint& constraint, 
     const std::vector<std::string>& row,
     const std::vector<std::string>& sourceColumns
 ) {
-    std::lock_guard<std::mutex> lock(mutex);
-    
     std::cout << "FKValidator: Starting validation for " << constraint.name << std::endl;
     std::cout << std::flush;
     
-    // Get the referenced table info
-    std::string lowerRefTable = toLowerCase(constraint.referencedTable);
-    auto tableIt = tables.find(lowerRefTable);
-    
-    if (tableIt == tables.end()) {
-        std::cout << "FKValidator: Referenced table not found: " << constraint.referencedTable << std::endl;
+    // Create a copy of the tables map to avoid holding the lock for too long
+    std::unordered_map<std::string, FKTableInfo> tablesCopy;
+    {
+        // Smaller scope for the lock to minimize time held
+        std::lock_guard<std::mutex> lock(mutex);
+        std::cout << "FKValidator: Acquired mutex lock" << std::endl;
         std::cout << std::flush;
-        return false;
+        
+        // Get the referenced table info
+        std::string lowerRefTable = toLowerCase(constraint.referencedTable);
+        auto tableIt = tables.find(lowerRefTable);
+        
+        if (tableIt == tables.end()) {
+            std::cout << "FKValidator: Referenced table not found: " << constraint.referencedTable << std::endl;
+            std::cout << std::flush;
+            return false;
+        }
+        
+        // Make a copy of the needed table info
+        tablesCopy[lowerRefTable] = tableIt->second;
     }
     
-    const FKTableInfo& refTableInfo = tableIt->second;
+    std::cout << "FKValidator: Released mutex lock, continuing validation" << std::endl;
+    std::cout << std::flush;
+    
+    // Continue validation with the copied data
+    std::string lowerRefTable = toLowerCase(constraint.referencedTable);
+    const FKTableInfo& refTableInfo = tablesCopy[lowerRefTable];
     
     // Extract FK values from the row
     std::vector<std::string> fkValues;
     std::vector<int> fkIndices;
     
     for (const auto& colName : constraint.columns) {
+        std::cout << "FKValidator: Looking for column " << colName << " in source columns" << std::endl;
+        std::cout << std::flush;
+        
         auto colIt = std::find(sourceColumns.begin(), sourceColumns.end(), colName);
         if (colIt == sourceColumns.end()) {
             std::cout << "FKValidator: Column not found: " << colName << std::endl;
@@ -81,7 +100,31 @@ bool ForeignKeyValidator::validateForeignKey(
         
         fkValues.push_back(row[colIdx]);
         fkIndices.push_back(colIdx);
+        
+        std::cout << "FKValidator: Added FK value: " << row[colIdx] << std::endl;
+        std::cout << std::flush;
     }
+    
+    // Method 1: Try the direct value check first for simple cases
+    if (constraint.columns.size() == 1 && constraint.referencedColumns.size() == 1) {
+        std::cout << "FKValidator: Trying direct value check for single column FK" << std::endl;
+        std::cout << std::flush;
+        
+        bool exists = refTableInfo.valueExists(constraint.referencedColumns[0], fkValues[0]);
+        if (exists) {
+            std::cout << "FKValidator: Match found via direct check - constraint satisfied" << std::endl;
+            std::cout << std::flush;
+            return true;
+        }
+    }
+    
+    // Method 2: Use the getAllRows function to check for matches directly
+    std::cout << "FKValidator: Getting all rows from referenced table" << std::endl;
+    std::cout << std::flush;
+    
+    auto refRows = refTableInfo.getAllRows();
+    std::cout << "FKValidator: Checking " << refRows.size() << " rows in referenced table" << std::endl;
+    std::cout << std::flush;
     
     // Get PK indices from referenced table
     std::vector<int> pkIndices;
@@ -95,12 +138,10 @@ bool ForeignKeyValidator::validateForeignKey(
         
         int colIdx = std::distance(refTableInfo.columns.begin(), colIt);
         pkIndices.push_back(colIdx);
+        
+        std::cout << "FKValidator: Found referenced column " << colName << " at index " << colIdx << std::endl;
+        std::cout << std::flush;
     }
-    
-    // Method 1: Use the getAllRows function to check for matches directly
-    auto refRows = refTableInfo.getAllRows();
-    std::cout << "FKValidator: Checking " << refRows.size() << " rows in referenced table" << std::endl;
-    std::cout << std::flush;
     
     for (const auto& refRow : refRows) {
         bool allMatch = true;
@@ -110,6 +151,8 @@ bool ForeignKeyValidator::validateForeignKey(
             
             // Safety check for index bounds
             if (pkIdx >= refRow.size()) {
+                std::cout << "FKValidator: PK index " << pkIdx << " out of range for row with size " << refRow.size() << std::endl;
+                std::cout << std::flush;
                 allMatch = false;
                 break;
             }
@@ -126,17 +169,6 @@ bool ForeignKeyValidator::validateForeignKey(
         
         if (allMatch) {
             std::cout << "FKValidator: Match found - constraint satisfied" << std::endl;
-            std::cout << std::flush;
-            return true;
-        }
-    }
-    
-    // If no match found with method 1, try method 2 (single column checks)
-    // For simple cases, checking individually can be faster
-    if (constraint.columns.size() == 1 && constraint.referencedColumns.size() == 1) {
-        bool exists = refTableInfo.valueExists(constraint.referencedColumns[0], fkValues[0]);
-        if (exists) {
-            std::cout << "FKValidator: Match found via direct check - constraint satisfied" << std::endl;
             std::cout << std::flush;
             return true;
         }

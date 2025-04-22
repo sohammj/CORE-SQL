@@ -957,8 +957,14 @@ bool Table::validateConstraints(const std::vector<std::string>& row) {
 // --------------
 
 // In Table.cpp, make sure addRow calls validateConstraints before adding the row:
+// Enhanced version with more debugging
 int Table::addRow(const std::vector<std::string>& values) {
+    std::cout << "Debug: addRow - Starting with " << values.size() << " values" << std::endl;
+    std::cout << std::flush;
+    
     std::unique_lock<std::shared_mutex> lock(mutex);
+    std::cout << "Debug: addRow - Acquired mutex lock" << std::endl;
+    std::cout << std::flush;
     
     if (values.size() != columns.size()) {
         throw DatabaseException("Incorrect number of values for row");
@@ -967,6 +973,8 @@ int Table::addRow(const std::vector<std::string>& values) {
     std::vector<std::string> rowValues = values;
     
     // Apply data type enforcement
+    std::cout << "Debug: addRow - Enforcing data types" << std::endl;
+    std::cout << std::flush;
     for (size_t i = 0; i < rowValues.size(); ++i) {
         enforceDataType(i, rowValues[i]);
     }
@@ -974,6 +982,8 @@ int Table::addRow(const std::vector<std::string>& values) {
     // Validate all constraints
     try {
         // Check NOT NULL constraints
+        std::cout << "Debug: addRow - Validating NOT NULL constraints" << std::endl;
+        std::cout << std::flush;
         for (size_t i = 0; i < notNullConstraints.size(); ++i) {
             if (notNullConstraints[i] && (i >= rowValues.size() || rowValues[i].empty())) {
                 throw ConstraintViolationException("NOT NULL constraint violated for column '" + columns[i] + "'");
@@ -985,12 +995,16 @@ int Table::addRow(const std::vector<std::string>& values) {
             switch (constraint.type) {
                 case Constraint::Type::PRIMARY_KEY:
                 case Constraint::Type::UNIQUE:
+                    std::cout << "Debug: addRow - Validating UNIQUE/PK constraint: " << constraint.name << std::endl;
+                    std::cout << std::flush;
                     if (!validateUniqueConstraint(constraint, rowValues)) {
                         throw ConstraintViolationException("UNIQUE constraint '" + constraint.name + "' violated");
                     }
                     break;
                     
                 case Constraint::Type::FOREIGN_KEY:
+                    std::cout << "Debug: addRow - Validating FK constraint: " << constraint.name << std::endl;
+                    std::cout << std::flush;
                     // Use the simple version of FK validation
                     if (!validateForeignKeyConstraintSimple(constraint, rowValues)) {
                         throw ReferentialIntegrityException("FOREIGN KEY constraint '" + 
@@ -999,6 +1013,8 @@ int Table::addRow(const std::vector<std::string>& values) {
                     break;
                     
                 case Constraint::Type::CHECK:
+                    std::cout << "Debug: addRow - Validating CHECK constraint: " << constraint.name << std::endl;
+                    std::cout << std::flush;
                     if (!validateCheckConstraint(constraint, rowValues)) {
                         throw ConstraintViolationException("CHECK constraint '" + constraint.name + "' violated");
                     }
@@ -1010,10 +1026,14 @@ int Table::addRow(const std::vector<std::string>& values) {
             }
         }
     } catch (const std::exception& e) {
+        std::cout << "Debug: addRow - Constraint validation failed: " << e.what() << std::endl;
+        std::cout << std::flush;
         throw DatabaseException(e.what());
     }
     
     // All constraints passed, add the row
+    std::cout << "Debug: addRow - All constraints passed, adding row" << std::endl;
+    std::cout << std::flush;
     rows.push_back(rowValues);
     return nextRowId++;
 }
@@ -1376,8 +1396,10 @@ void Table::enforceDataType(int columnIndex, std::string& value) {
 }
 
 // In Table.cpp, update the validateUniqueConstraint method:
+// Modified version of validateUniqueConstraint without additional mutex lock
 bool Table::validateUniqueConstraint(const Constraint& constraint, const std::vector<std::string>& newRow) {
-    std::unique_lock<std::shared_mutex> lock(mutex);
+    // REMOVED: std::unique_lock<std::shared_mutex> lock(mutex);
+    // The caller (addRow) already has the lock
     
     // Extract column indices for the constraint
     std::vector<int> colIndices;
