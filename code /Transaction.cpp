@@ -3,23 +3,19 @@
 #include "Table.h"
 #include "Utils.h"
 #include <iostream>
-
 // Initialize static member
 int Transaction::nextTransactionId = 1;
-
 Transaction::Transaction(Database* db, IsolationLevel level)
     : database(db), isolationLevel(level), active(false), transactionId(nextTransactionId++) {}
-
 Transaction::~Transaction() {
     if (active) {
         try {
             rollback();
         } catch (const std::exception& e) {
-            std::cerr << "Error during transaction destructor rollback: " << e.what() << std::endl;
+            std::cerr << "Error: " << e.what() << std::endl;
         }
     }
 }
-
 void Transaction::begin() {
     if (active) {
         throw TransactionException("Transaction already active");
@@ -28,7 +24,6 @@ void Transaction::begin() {
     active = true;
     std::cout << "Transaction " << transactionId << " started." << std::endl;
 }
-
 void Transaction::commit() {
     if (!active) {
         throw TransactionException("No active transaction to commit");
@@ -43,7 +38,6 @@ void Transaction::commit() {
     active = false;
     std::cout << "Transaction " << transactionId << " committed." << std::endl;
 }
-
 void Transaction::rollback() {
     if (!active) {
         throw TransactionException("No active transaction to rollback");
@@ -63,7 +57,6 @@ void Transaction::rollback() {
     active = false;
     std::cout << "Transaction " << transactionId << " rolled back." << std::endl;
 }
-
 void Transaction::createTable(const std::string& tableName,
                             const std::vector<std::pair<std::string, std::string>>& columns) {
     if (!active) {
@@ -82,7 +75,6 @@ void Transaction::createTable(const std::string& tableName,
     state.columns.clear(); // Empty indicates this is a new table
     tableStates[toLowerCase(tableName)] = state;
 }
-
 void Transaction::dropTable(const std::string& tableName) {
     if (!active) {
         throw TransactionException("No active transaction");
@@ -94,7 +86,6 @@ void Transaction::dropTable(const std::string& tableName) {
     // The actual table drop is handled by the database
     database->dropTable(tableName);
 }
-
 void Transaction::alterTable(const std::string& tableName, const std::string& operation) {
     if (!active) {
         throw TransactionException("No active transaction");
@@ -107,7 +98,6 @@ void Transaction::alterTable(const std::string& tableName, const std::string& op
     // For now, this is just a placeholder since the operation is complex
     // and depends on the specific ALTER action
 }
-
 void Transaction::insertRecord(const std::string& tableName, const std::vector<std::string>& values) {
     if (!active) {
         throw TransactionException("No active transaction");
@@ -127,7 +117,6 @@ void Transaction::insertRecord(const std::string& tableName, const std::vector<s
     
     database->insertRecord(tableName, valuesList);
 }
-
 void Transaction::deleteRecords(const std::string& tableName, const std::string& condition) {
     if (!active) {
         throw TransactionException("No active transaction");
@@ -143,7 +132,6 @@ void Transaction::deleteRecords(const std::string& tableName, const std::string&
     
     database->deleteRecords(tableName, condition);
 }
-
 void Transaction::updateRecords(const std::string& tableName,
                               const std::vector<std::pair<std::string, std::string>>& updates,
                               const std::string& condition) {
@@ -161,7 +149,6 @@ void Transaction::updateRecords(const std::string& tableName,
     
     database->updateRecords(tableName, updates, condition);
 }
-
 void Transaction::lockTableShared(const std::string& tableName) {
     std::string lowerName = toLowerCase(tableName);
     
@@ -179,7 +166,6 @@ void Transaction::lockTableShared(const std::string& tableName) {
     table->lockShared();
     sharedLocks.insert(lowerName);
 }
-
 void Transaction::lockTableExclusive(const std::string& tableName) {
     std::string lowerName = toLowerCase(tableName);
     
@@ -200,7 +186,6 @@ void Transaction::lockTableExclusive(const std::string& tableName) {
     // Add to exclusive locks
     exclusiveLocks.insert(lowerName);
 }
-
 void Transaction::releaseLocks() {
     // Release all shared locks
     for (const auto& tableName : sharedLocks) {
@@ -220,7 +205,6 @@ void Transaction::releaseLocks() {
     }
     exclusiveLocks.clear();
 }
-
 void Transaction::saveTableState(const std::string& tableName) {
     std::string lowerName = toLowerCase(tableName);
     
@@ -244,7 +228,6 @@ void Transaction::saveTableState(const std::string& tableName) {
     // Store the table state
     tableStates[lowerName] = state;
 }
-
 void Transaction::restoreTableState(const std::string& tableName) {
     std::string lowerName = toLowerCase(tableName);
     
@@ -287,7 +270,6 @@ void Transaction::restoreTableState(const std::string& tableName) {
     }
 }
 // Add to Transaction.cpp if needed
-
 // When main.cpp calls database->commitTransaction(transaction)
 void Database::commitTransaction(Transaction* transaction) {
     if (!transaction || !transaction->isActive()) {
@@ -300,7 +282,6 @@ void Database::commitTransaction(Transaction* transaction) {
     // Remove from active transactions
     activeTransactions.erase(transaction);
 }
-
 // When main.cpp calls database->rollbackTransaction(transaction)
 void Database::rollbackTransaction(Transaction* transaction) {
     if (!transaction || !transaction->isActive()) {

@@ -3,7 +3,6 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
-
 void Storage::saveTableToFile(const Table& table, const std::string& tableName) {
     try {
         std::ofstream tableFile(tableName + ".tbl");
@@ -83,7 +82,6 @@ void Storage::saveTableToFile(const Table& table, const std::string& tableName) 
         throw DatabaseException("Error saving table: " + std::string(e.what()));
     }
 }
-
 Table* Storage::loadTableFromFile(const std::string& tableName) {
     try {
         std::ifstream tableFile(tableName + ".tbl");
@@ -251,7 +249,6 @@ Table* Storage::loadTableFromFile(const std::string& tableName) {
         throw DatabaseException("Error loading table: " + std::string(e.what()));
     }
 }
-
 void Storage::saveDatabase(const std::string& dbName, 
                           const std::map<std::string, Table*>& tables,
                           const std::map<std::string, std::string>& views) {
@@ -279,7 +276,6 @@ void Storage::saveDatabase(const std::string& dbName,
         throw DatabaseException("Error saving database: " + std::string(e.what()));
     }
 }
-
 void Storage::loadDatabase(const std::string& dbName, 
                           std::map<std::string, Table*>& tables,
                           std::map<std::string, std::string>& views) {

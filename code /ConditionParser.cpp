@@ -6,9 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <regex>
-
 // --- Expression Subclasses ---
-
 // Base expression for literal values
 class LiteralExpression : public ConditionExpression {
 public:
@@ -34,7 +32,6 @@ public:
 private:
     std::string value;
 };
-
 // Column reference expression
 class ColumnExpression : public ConditionExpression {
 public:
@@ -80,7 +77,6 @@ public:
 private:
     std::string column;
 };
-
 // Comparison expression
 class ComparisonExpression : public ConditionExpression {
 public:
@@ -88,7 +84,6 @@ public:
                         const std::string& op, 
                         std::unique_ptr<ConditionExpression> right)
         : left(std::move(left)), op(op), right(std::move(right)) {}
-
     bool evaluate(const std::vector<std::string>& row,
                   const std::vector<std::string>& columns) const override {
         // Check for specific column expression cases
@@ -200,12 +195,10 @@ private:
     std::string op;
     std::unique_ptr<ConditionExpression> right;
 };
-
 class AndExpression : public ConditionExpression {
 public:
     AndExpression(std::unique_ptr<ConditionExpression> left, std::unique_ptr<ConditionExpression> right)
         : left(std::move(left)), right(std::move(right)) {}
-
     bool evaluate(const std::vector<std::string>& row,
                   const std::vector<std::string>& columns) const override {
         return left->evaluate(row, columns) && right->evaluate(row, columns);
@@ -215,12 +208,10 @@ private:
     std::unique_ptr<ConditionExpression> left;
     std::unique_ptr<ConditionExpression> right;
 };
-
 class OrExpression : public ConditionExpression {
 public:
     OrExpression(std::unique_ptr<ConditionExpression> left, std::unique_ptr<ConditionExpression> right)
         : left(std::move(left)), right(std::move(right)) {}
-
     bool evaluate(const std::vector<std::string>& row,
                   const std::vector<std::string>& columns) const override {
         return left->evaluate(row, columns) || right->evaluate(row, columns);
@@ -230,12 +221,10 @@ private:
     std::unique_ptr<ConditionExpression> left;
     std::unique_ptr<ConditionExpression> right;
 };
-
 class NotExpression : public ConditionExpression {
 public:
     explicit NotExpression(std::unique_ptr<ConditionExpression> expr)
         : expr(std::move(expr)) {}
-
     bool evaluate(const std::vector<std::string>& row,
                   const std::vector<std::string>& columns) const override {
         return !expr->evaluate(row, columns);
@@ -244,12 +233,10 @@ public:
 private:
     std::unique_ptr<ConditionExpression> expr;
 };
-
 class IsNullExpression : public ConditionExpression {
 public:
     IsNullExpression(std::unique_ptr<ConditionExpression> expr, bool isNull)
         : expr(std::move(expr)), isNull(isNull) {}
-
     bool evaluate(const std::vector<std::string>& row,
                   const std::vector<std::string>& columns) const override {
         // Only makes sense for column expressions
@@ -265,7 +252,6 @@ private:
     std::unique_ptr<ConditionExpression> expr;
     bool isNull; // true for IS NULL, false for IS NOT NULL
 };
-
 class BetweenExpression : public ConditionExpression {
 public:
     BetweenExpression(std::unique_ptr<ConditionExpression> expr,
@@ -274,7 +260,6 @@ public:
                      bool notBetween)
         : expr(std::move(expr)), lower(std::move(lower)), 
           upper(std::move(upper)), notBetween(notBetween) {}
-
     bool evaluate(const std::vector<std::string>& row,
                   const std::vector<std::string>& columns) const override {
         // Handles Column BETWEEN Literal AND Literal
@@ -312,14 +297,12 @@ private:
     std::unique_ptr<ConditionExpression> upper;
     bool notBetween;
 };
-
 class InExpression : public ConditionExpression {
 public:
     InExpression(std::unique_ptr<ConditionExpression> expr,
                std::vector<std::unique_ptr<ConditionExpression>> valueList,
                bool notIn)
         : expr(std::move(expr)), valueList(std::move(valueList)), notIn(notIn) {}
-
     bool evaluate(const std::vector<std::string>& row,
                   const std::vector<std::string>& columns) const override {
         // Only makes sense for column expressions
@@ -346,12 +329,10 @@ private:
     std::vector<std::unique_ptr<ConditionExpression>> valueList;
     bool notIn;
 };
-
 // --- ConditionParser Implementation ---
 ConditionParser::ConditionParser(const std::string& condition) : current(0) {
     tokenize(condition);
 }
-
 void ConditionParser::tokenize(const std::string& condition) {
     std::string buffer;
     bool inQuotes = false;
@@ -411,7 +392,6 @@ void ConditionParser::tokenize(const std::string& condition) {
     // Process special tokens like IS NULL, BETWEEN, IN, etc.
     processSpecialTokens();
 }
-
 void ConditionParser::processSpecialTokens() {
     std::vector<std::string> processedTokens;
     
@@ -452,19 +432,16 @@ void ConditionParser::processSpecialTokens() {
     
     tokens = processedTokens;
 }
-
 std::string ConditionParser::peek() const {
     if (current < tokens.size())
         return tokens[current];
     return "";
 }
-
 std::string ConditionParser::getNext() {
     if (current < tokens.size())
         return tokens[current++];
     return "";
 }
-
 bool ConditionParser::matchToken(const std::string& token) {
     if (toUpperCase(peek()) == toUpperCase(token)) {
         current++;
@@ -472,14 +449,12 @@ bool ConditionParser::matchToken(const std::string& token) {
     }
     return false;
 }
-
 ConditionExprPtr ConditionParser::parse() {
     if (tokens.empty()) {
         return std::make_unique<LiteralExpression>("TRUE");
     }
     return parseExpression();
 }
-
 ConditionExprPtr ConditionParser::parseExpression() {
     // expr -> term { OR term }
     auto left = parseTerm();
@@ -492,7 +467,6 @@ ConditionExprPtr ConditionParser::parseExpression() {
     
     return left;
 }
-
 ConditionExprPtr ConditionParser::parseTerm() {
     // term -> factor { AND factor }
     auto left = parseFactor();
@@ -505,7 +479,6 @@ ConditionExprPtr ConditionParser::parseTerm() {
     
     return left;
 }
-
 ConditionExprPtr ConditionParser::parseFactor() {
     // factor -> NOT factor | '(' expr ')' | predicate
     if (toUpperCase(peek()) == "NOT") {
@@ -523,7 +496,6 @@ ConditionExprPtr ConditionParser::parseFactor() {
     
     return parsePredicate();
 }
-
 ConditionExprPtr ConditionParser::parsePredicate() {
     // Handle various predicate types:
     // 1. value op value (comparison)
@@ -609,7 +581,6 @@ ConditionExprPtr ConditionParser::parsePredicate() {
         return leftExpr;
     }
 }
-
 ConditionExprPtr ConditionParser::parseSimpleValue() {
     std::string value = getNext();
     

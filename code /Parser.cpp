@@ -8,14 +8,12 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <regex>
-
 Query Parser::parseQuery(const std::string& queryStr) {
     Query q;
     std::istringstream iss(queryStr);
     std::string word;
     iss >> word;
     std::string command = toUpperCase(word);
-
     // WITH clause should be processed first
     if (command == "WITH") {
         q.withClauses = parseWithClause(queryStr);
@@ -45,7 +43,6 @@ Query Parser::parseQuery(const std::string& queryStr) {
         std::string mainQuery = queryStr.substr(mainQueryPos);
         return parseQuery(mainQuery);
     }
-
     if (command == "CREATE") {
         iss >> word;
         std::string objectType = toUpperCase(word);
@@ -121,7 +118,6 @@ Query Parser::parseQuery(const std::string& queryStr) {
     
     return q;
 }
-
 std::vector<std::vector<std::string>> Parser::extractValues(const std::string& query) {
     std::vector<std::vector<std::string>> values;
     
@@ -170,7 +166,6 @@ std::vector<std::vector<std::string>> Parser::extractValues(const std::string& q
     
     return values;
 }
-
 std::vector<std::pair<std::string, std::string>> Parser::extractColumns(const std::string& query) {
     std::vector<std::pair<std::string, std::string>> cols;
     
@@ -395,7 +390,6 @@ std::vector<Constraint> Parser::extractConstraints(const std::string& query) {
     
     return constraints;
 }
-
 std::vector<std::pair<std::string, std::string>> Parser::extractWithClauses(const std::string& query) {
     std::vector<std::pair<std::string, std::string>> clauses;
     
@@ -430,7 +424,6 @@ std::vector<std::pair<std::string, std::string>> Parser::extractWithClauses(cons
     
     return clauses;
 }
-
 Query Parser::parseCreateTable(const std::string& query) {
     Query q;
     q.type = "CREATE";
@@ -460,7 +453,6 @@ Query Parser::parseCreateTable(const std::string& query) {
     
     return q;
 }
-
 Query Parser::parseCreateIndex(const std::string& query) {
     Query q;
     q.type = "CREATEINDEX";
@@ -486,7 +478,6 @@ Query Parser::parseCreateIndex(const std::string& query) {
     
     return q;
 }
-
 Query Parser::parseCreateView(const std::string& query) {
     Query q;
     q.type = "CREATEVIEW";
@@ -506,7 +497,6 @@ Query Parser::parseCreateView(const std::string& query) {
     
     return q;
 }
-
 Query Parser::parseCreateType(const std::string& query) {
     Query q;
     q.type = "CREATETYPE";
@@ -523,7 +513,6 @@ Query Parser::parseCreateType(const std::string& query) {
     
     return q;
 }
-
 Query Parser::parseCreateAssertion(const std::string& query) {
     Query q;
     q.type = "CREATEASSERTION";
@@ -543,7 +532,6 @@ Query Parser::parseCreateAssertion(const std::string& query) {
     
     return q;
 }
-
 Query Parser::parseAlterTable(const std::string& query) {
     Query q;
     q.type = "ALTER";
@@ -606,7 +594,6 @@ Query Parser::parseAlterTable(const std::string& query) {
     
     return q;
 }
-
 Query Parser::parseInsert(const std::string& query) {
     Query q;
     q.type = "INSERT";
@@ -623,7 +610,6 @@ Query Parser::parseInsert(const std::string& query) {
     
     return q;
 }
-
 Query Parser::parseSelect(const std::string& query) {
     Query q;
     q.type = "SELECT";
@@ -749,7 +735,6 @@ Query Parser::parseSelect(const std::string& query) {
     
     return q;
 }
-
 Query Parser::parseUpdate(const std::string& query) {
     Query q;
     q.type = "UPDATE";
@@ -769,7 +754,6 @@ Query Parser::parseUpdate(const std::string& query) {
     
     return q;
 }
-
 Query Parser::parseDelete(const std::string& query) {
     Query q;
     q.type = "DELETE";
@@ -786,7 +770,6 @@ Query Parser::parseDelete(const std::string& query) {
     
     return q;
 }
-
 Query Parser::parseGrant(const std::string& query) {
     Query q;
     q.type = "GRANT";
@@ -823,7 +806,6 @@ Query Parser::parseGrant(const std::string& query) {
     
     return q;
 }
-
 Query Parser::parseRevoke(const std::string& query) {
     Query q;
     q.type = "REVOKE";
@@ -849,9 +831,6 @@ Query Parser::parseRevoke(const std::string& query) {
     
     return q;
 }
-
-
-
 std::vector<std::string> Parser::extractSelectColumns(const std::string& query) {
     std::vector<std::string> columns;
     
@@ -886,7 +865,6 @@ std::vector<std::string> Parser::extractSelectColumns(const std::string& query) 
     
     return columns;
 }
-
 std::string Parser::extractCondition(const std::string& query) {
     std::string condition;
     
@@ -904,7 +882,6 @@ std::string Parser::extractCondition(const std::string& query) {
     
     return condition;
 }
-
 std::vector<std::pair<std::string, std::string>> Parser::extractUpdates(const std::string& query) {
     std::vector<std::pair<std::string, std::string>> updates;
     
@@ -938,7 +915,6 @@ std::vector<std::pair<std::string, std::string>> Parser::extractUpdates(const st
     
     return updates;
 }
-
 std::pair<std::string, std::string> Parser::parseJoinCondition(const std::string& query) {
     std::pair<std::string, std::string> condition;
     
@@ -957,11 +933,9 @@ std::pair<std::string, std::string> Parser::parseJoinCondition(const std::string
     
     return condition;
 }
-
 std::vector<std::pair<std::string, std::string>> Parser::parseWithClause(const std::string& query) {
     return extractWithClauses(query);
 }
-
 std::pair<std::string, std::string> Parser::parseSetOperation(const std::string& query) {
     std::pair<std::string, std::string> parts;
     
@@ -991,7 +965,6 @@ std::pair<std::string, std::string> Parser::parseSetOperation(const std::string&
     
     return parts;
 }
-
 std::vector<std::string> Parser::extractSubqueries(const std::string& query) {
     std::vector<std::string> subqueries;
     

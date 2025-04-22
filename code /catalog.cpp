@@ -2,9 +2,7 @@
 #include <iostream>
 #include <algorithm>
 #include "Utils.h"
-
 Catalog::Catalog() {}
-
 // Table metadata management
 void Catalog::addTable(const std::string& tableName, 
                      const std::vector<std::string>& columns,
@@ -20,7 +18,6 @@ void Catalog::addTable(const std::string& tableName,
     info.constraints = constraints;
     tables[lowerName] = info;
 }
-
 void Catalog::removeTable(const std::string& tableName) {
     std::string lowerName = toLowerCase(tableName);
     tables.erase(lowerName);
@@ -42,7 +39,6 @@ void Catalog::removeTable(const std::string& tableName) {
             }),
         privileges.end());
 }
-
 void Catalog::renameTable(const std::string& oldName, const std::string& newName) {
     std::string lowerOldName = toLowerCase(oldName);
     std::string lowerNewName = toLowerCase(newName);
@@ -68,11 +64,9 @@ void Catalog::renameTable(const std::string& oldName, const std::string& newName
         }
     }
 }
-
 bool Catalog::tableExists(const std::string& tableName) const {
     return tables.find(toLowerCase(tableName)) != tables.end();
 }
-
 const TableInfo& Catalog::getTableInfo(const std::string& tableName) const {
     auto it = tables.find(toLowerCase(tableName));
     if (it == tables.end()) {
@@ -80,7 +74,6 @@ const TableInfo& Catalog::getTableInfo(const std::string& tableName) const {
     }
     return it->second;
 }
-
 // View metadata management
 void Catalog::addView(const std::string& viewName, const std::string& definition, bool isUpdatable) {
     std::string lowerName = toLowerCase(viewName);
@@ -90,7 +83,6 @@ void Catalog::addView(const std::string& viewName, const std::string& definition
     info.isUpdatable = isUpdatable;
     views[lowerName] = info;
 }
-
 void Catalog::removeView(const std::string& viewName) {
     views.erase(toLowerCase(viewName));
     
@@ -102,11 +94,9 @@ void Catalog::removeView(const std::string& viewName) {
             }),
         privileges.end());
 }
-
 bool Catalog::viewExists(const std::string& viewName) const {
     return views.find(toLowerCase(viewName)) != views.end();
 }
-
 const ViewInfo& Catalog::getViewInfo(const std::string& viewName) const {
     auto it = views.find(toLowerCase(viewName));
     if (it == views.end()) {
@@ -114,7 +104,6 @@ const ViewInfo& Catalog::getViewInfo(const std::string& viewName) const {
     }
     return it->second;
 }
-
 // Index metadata management
 void Catalog::addIndex(const std::string& indexName, const std::string& tableName, 
                       const std::string& columnName, bool isUnique) {
@@ -126,15 +115,12 @@ void Catalog::addIndex(const std::string& indexName, const std::string& tableNam
     info.isUnique = isUnique;
     indexes[lowerName] = info;
 }
-
 void Catalog::removeIndex(const std::string& indexName) {
     indexes.erase(toLowerCase(indexName));
 }
-
 bool Catalog::indexExists(const std::string& indexName) const {
     return indexes.find(toLowerCase(indexName)) != indexes.end();
 }
-
 const IndexInfo& Catalog::getIndexInfo(const std::string& indexName) const {
     auto it = indexes.find(toLowerCase(indexName));
     if (it == indexes.end()) {
@@ -142,7 +128,6 @@ const IndexInfo& Catalog::getIndexInfo(const std::string& indexName) const {
     }
     return it->second;
 }
-
 // User-defined type metadata management
 void Catalog::addType(const std::string& typeName, const std::vector<std::pair<std::string, std::string>>& attributes) {
     std::string lowerName = toLowerCase(typeName);
@@ -151,15 +136,12 @@ void Catalog::addType(const std::string& typeName, const std::vector<std::pair<s
     info.attributes = attributes;
     types[lowerName] = info;
 }
-
 void Catalog::removeType(const std::string& typeName) {
     types.erase(toLowerCase(typeName));
 }
-
 bool Catalog::typeExists(const std::string& typeName) const {
     return types.find(toLowerCase(typeName)) != types.end();
 }
-
 const TypeInfo& Catalog::getTypeInfo(const std::string& typeName) const {
     auto it = types.find(toLowerCase(typeName));
     if (it == types.end()) {
@@ -167,7 +149,6 @@ const TypeInfo& Catalog::getTypeInfo(const std::string& typeName) const {
     }
     return it->second;
 }
-
 // Assertion metadata management
 void Catalog::addAssertion(const std::string& assertionName, const std::string& condition) {
     std::string lowerName = toLowerCase(assertionName);
@@ -176,15 +157,12 @@ void Catalog::addAssertion(const std::string& assertionName, const std::string& 
     info.condition = condition;
     assertions[lowerName] = info;
 }
-
 void Catalog::removeAssertion(const std::string& assertionName) {
     assertions.erase(toLowerCase(assertionName));
 }
-
 bool Catalog::assertionExists(const std::string& assertionName) const {
     return assertions.find(toLowerCase(assertionName)) != assertions.end();
 }
-
 const AssertionInfo& Catalog::getAssertionInfo(const std::string& assertionName) const {
     auto it = assertions.find(toLowerCase(assertionName));
     if (it == assertions.end()) {
@@ -192,7 +170,6 @@ const AssertionInfo& Catalog::getAssertionInfo(const std::string& assertionName)
     }
     return it->second;
 }
-
 // Privilege metadata management
 void Catalog::addPrivilege(const std::string& username, const std::string& objectName, 
                           const std::string& privilegeType, bool withGrantOption) {
@@ -214,7 +191,6 @@ void Catalog::addPrivilege(const std::string& username, const std::string& objec
     
     privileges.push_back(info);
 }
-
 void Catalog::removePrivilege(const std::string& username, const std::string& objectName, 
                              const std::string& privilegeType) {
     privileges.erase(
@@ -227,7 +203,6 @@ void Catalog::removePrivilege(const std::string& username, const std::string& ob
             }),
         privileges.end());
 }
-
 bool Catalog::checkPrivilege(const std::string& username, const std::string& objectName, 
                             const std::string& privilegeType) const {
     for (const auto& p : privileges) {
@@ -240,7 +215,6 @@ bool Catalog::checkPrivilege(const std::string& username, const std::string& obj
     }
     return false;
 }
-
 std::vector<PrivilegeInfo> Catalog::getUserPrivileges(const std::string& username) const {
     std::vector<PrivilegeInfo> result;
     for (const auto& p : privileges) {
@@ -250,7 +224,6 @@ std::vector<PrivilegeInfo> Catalog::getUserPrivileges(const std::string& usernam
     }
     return result;
 }
-
 // Schema display methods
 void Catalog::showSchema() const {
     std::cout << "=== DATABASE SCHEMA ===" << std::endl;
@@ -350,21 +323,18 @@ void Catalog::showSchema() const {
         }
     }
 }
-
 void Catalog::showTables() const {
     std::cout << "Tables:" << std::endl;
     for (const auto& tablePair : tables) {
         std::cout << "  " << tablePair.second.name << std::endl;
     }
 }
-
 void Catalog::showViews() const {
     std::cout << "Views:" << std::endl;
     for (const auto& viewPair : views) {
         std::cout << "  " << viewPair.second.name << std::endl;
     }
 }
-
 void Catalog::showIndexes() const {
     std::cout << "Indexes:" << std::endl;
     for (const auto& indexPair : indexes) {
@@ -372,21 +342,18 @@ void Catalog::showIndexes() const {
                  << indexPair.second.tableName << "(" << indexPair.second.columnName << ")" << std::endl;
     }
 }
-
 void Catalog::showTypes() const {
     std::cout << "User-defined Types:" << std::endl;
     for (const auto& typePair : types) {
         std::cout << "  " << typePair.second.name << std::endl;
     }
 }
-
 void Catalog::showAssertions() const {
     std::cout << "Assertions:" << std::endl;
     for (const auto& assertionPair : assertions) {
         std::cout << "  " << assertionPair.second.name << std::endl;
     }
 }
-
 void Catalog::showPrivileges() const {
     std::cout << "Privileges:" << std::endl;
     for (const auto& privilege : privileges) {
@@ -398,7 +365,6 @@ void Catalog::showPrivileges() const {
         std::cout << std::endl;
     }
 }
-
 // Get lists of object names
 std::vector<std::string> Catalog::getTableNames() const {
     std::vector<std::string> result;
@@ -407,7 +373,6 @@ std::vector<std::string> Catalog::getTableNames() const {
     }
     return result;
 }
-
 std::vector<std::string> Catalog::getViewNames() const {
     std::vector<std::string> result;
     for (const auto& viewPair : views) {
@@ -415,7 +380,6 @@ std::vector<std::string> Catalog::getViewNames() const {
     }
     return result;
 }
-
 std::vector<std::string> Catalog::getIndexNames() const {
     std::vector<std::string> result;
     for (const auto& indexPair : indexes) {
@@ -423,7 +387,6 @@ std::vector<std::string> Catalog::getIndexNames() const {
     }
     return result;
 }
-
 std::vector<std::string> Catalog::getTypeNames() const {
     std::vector<std::string> result;
     for (const auto& typePair : types) {
@@ -431,7 +394,6 @@ std::vector<std::string> Catalog::getTypeNames() const {
     }
     return result;
 }
-
 std::vector<std::string> Catalog::getAssertionNames() const {
     std::vector<std::string> result;
     for (const auto& assertionPair : assertions) {

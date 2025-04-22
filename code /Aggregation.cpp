@@ -5,7 +5,6 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <cmath>
-
 double Aggregation::computeMean(const std::vector<std::string>& values) {
     double sum = 0;
     int count = 0;
@@ -30,7 +29,6 @@ double Aggregation::computeMean(const std::vector<std::string>& values) {
     
     return sum / count;
 }
-
 double Aggregation::computeMin(const std::vector<std::string>& values) {
     double min = std::numeric_limits<double>::infinity();
     bool found = false;
@@ -57,7 +55,6 @@ double Aggregation::computeMin(const std::vector<std::string>& values) {
     
     return min;
 }
-
 double Aggregation::computeMax(const std::vector<std::string>& values) {
     double max = -std::numeric_limits<double>::infinity();
     bool found = false;
@@ -84,7 +81,6 @@ double Aggregation::computeMax(const std::vector<std::string>& values) {
     
     return max;
 }
-
 double Aggregation::computeSum(const std::vector<std::string>& values) {
     double sum = 0;
     
@@ -102,7 +98,6 @@ double Aggregation::computeSum(const std::vector<std::string>& values) {
     
     return sum;
 }
-
 std::string Aggregation::computeMedian(std::vector<std::string> values) {
     std::vector<double> nums;
     
@@ -139,7 +134,6 @@ std::string Aggregation::computeMedian(std::vector<std::string> values) {
     oss << median;
     return oss.str();
 }
-
 std::string Aggregation::computeMode(const std::vector<std::string>& values) {
     if (values.empty()) {
         return ""; // Return empty string for empty set
@@ -168,7 +162,6 @@ std::string Aggregation::computeMode(const std::vector<std::string>& values) {
     
     return mode;
 }
-
 int Aggregation::computeCount(const std::vector<std::string>& values, bool countAll) {
     if (countAll) {
         // COUNT(*) - count all rows including NULL values
@@ -184,7 +177,6 @@ int Aggregation::computeCount(const std::vector<std::string>& values, bool count
         return count;
     }
 }
-
 std::string Aggregation::computeStdDev(const std::vector<std::string>& values, bool population) {
     std::vector<double> nums;
     
@@ -229,7 +221,6 @@ std::string Aggregation::computeStdDev(const std::vector<std::string>& values, b
     oss << stdDev;
     return oss.str();
 }
-
 std::string Aggregation::computeVariance(const std::vector<std::string>& values, bool population) {
     std::vector<double> nums;
     
@@ -274,7 +265,6 @@ std::string Aggregation::computeVariance(const std::vector<std::string>& values,
     oss << variance;
     return oss.str();
 }
-
 std::string Aggregation::computeStringConcat(const std::vector<std::string>& values, const std::string& separator) {
     std::string result;
     bool first = true;
@@ -295,7 +285,6 @@ std::string Aggregation::computeStringConcat(const std::vector<std::string>& val
     
     return result;
 }
-
 double Aggregation::computePercentile(std::vector<std::string> values, double percentile) {
     if (percentile < 0 || percentile > 100) {
         throw std::invalid_argument("Percentile must be between 0 and 100");

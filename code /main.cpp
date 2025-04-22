@@ -8,8 +8,6 @@
 #include "Utils.h"
 #include "Transaction.h"
 Database* g_db = nullptr;
-
-
 int main() {
     try {
         // Create database instance
@@ -184,7 +182,7 @@ int main() {
                             db.rollbackTransaction(currentTransaction);
                             currentTransaction = nullptr;
                         } catch (const std::exception& e) {
-                            std::cerr << "Error during transaction rollback: " << e.what() << std::endl;
+                            std::cerr << "Error: " << e.what() << std::endl;
                         }
                     }
                     return 0;

@@ -2,7 +2,6 @@
 #include "Utils.h"
 #include <algorithm>
 #include <iostream>
-
 bool LockManager::acquireLock(int transactionId, const std::string& resourceName,
                              ResourceType resourceType, LockMode mode) {
     // Acquire exclusive lock on the lock table
@@ -61,7 +60,6 @@ bool LockManager::acquireLock(int transactionId, const std::string& resourceName
     locks.push_back(request);
     return false;
 }
-
 void LockManager::releaseAllLocks(int transactionId) {
     // Acquire exclusive lock on the lock table
     std::unique_lock<std::shared_mutex> lock(mutex);
@@ -90,7 +88,6 @@ void LockManager::releaseAllLocks(int transactionId) {
         }
     }
 }
-
 bool LockManager::detectDeadlock() {
     // Acquire shared lock on the lock table
     std::shared_lock<std::shared_mutex> lock(mutex);
@@ -135,7 +132,6 @@ bool LockManager::detectDeadlock() {
     
     return false;
 }
-
 std::vector<LockRequest> LockManager::getTransactionLocks(int transactionId) const {
     // Acquire shared lock on the lock table
     std::shared_lock<std::shared_mutex> lock(mutex);
@@ -154,7 +150,6 @@ std::vector<LockRequest> LockManager::getTransactionLocks(int transactionId) con
     
     return result;
 }
-
 bool LockManager::isCompatible(const LockRequest& request, 
                               const std::vector<LockRequest>& existingLocks) {
     // Exclusive locks require no existing granted locks
@@ -173,7 +168,6 @@ bool LockManager::isCompatible(const LockRequest& request,
     
     return false;
 }
-
 bool LockManager::hasCycle(const std::unordered_map<int, std::set<int>>& waitForGraph,
                           int start, std::set<int>& visited, std::set<int>& recStack) {
     // Mark current node as visited and part of recursion stack

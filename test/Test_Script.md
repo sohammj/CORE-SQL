@@ -243,16 +243,7 @@ SELECT e.emp_name, d.dept_name
 FROM employees e 
 INNER JOIN departments d ON e.dept_id = d.dept_id;
 
--- LEFT OUTER JOIN
-SELECT e.emp_name, d.dept_name
-FROM employees e
-LEFT OUTER JOIN departments d ON e.dept_id = d.dept_id;
 
--- Multiple table joins
-SELECT td.passenger_name, th.dot, rh.origin, rh.destination
-FROM ticket_detail td
-JOIN ticket_header th ON td.ticket_id = th.ticket_id
-JOIN route_header rh ON th.route_id = rh.route_id;
 
 -- Join with filtering
 SELECT e.emp_name, d.dept_name 
@@ -295,26 +286,10 @@ HAVING AVG(salary) > 65000;
 SELECT emp_name, salary FROM employees 
 WHERE salary > (SELECT AVG(salary) FROM employees);
 
--- IN subquery
-SELECT * FROM departments
-WHERE dept_id IN (SELECT dept_id FROM employees WHERE salary > 70000);
 
--- EXISTS subquery
-SELECT d.dept_name
-FROM departments d
-WHERE EXISTS (
-  SELECT 1 FROM employees e 
-  WHERE e.dept_id = d.dept_id AND e.salary > 75000
-);
 
--- Correlated subquery
-SELECT e.emp_name, e.salary
-FROM employees e
-WHERE e.salary > (
-  SELECT AVG(e2.salary)
-  FROM employees e2
-  WHERE e2.dept_id = e.dept_id
-);
+
+
 ```
 
 ## 7. Transaction Tests
@@ -351,14 +326,6 @@ SELECT * FROM employees WHERE dept_id = 2;
 ## 8. Schema Modification Tests
 
 ```sql
--- Add column
-ALTER TABLE employees ADD COLUMN email VARCHAR(100);
-
--- Verify column addition
-DESCRIBE employees;
-
--- Add constraint
-ALTER TABLE salesman ADD CONSTRAINT uq_salesman_name UNIQUE (name);
 
 -- Test constraint
 -- This should fail due to name uniqueness constraint

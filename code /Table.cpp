@@ -11,21 +11,17 @@
 #include "Database.h"
 #include "ForeignKeyValidator.h" 
 extern Database* _g_db;
-
 // Table Class Implementation
 // -------------------------
-
 Table::Table(const std::string& name) : 
     tableName(name), 
     nextRowId(1) 
     {
-        std::cout << "Debug: Table constructor called for " << name << std::endl;
-        std::cout << std::flush;
+        
+        
     }
-
 // Set Operations
 // --------------
-
 std::vector<std::vector<std::string>> Table::setUnion(const std::vector<std::vector<std::string>>& otherResult) {
     std::shared_lock<std::shared_mutex> lock(mutex);
     
@@ -39,7 +35,6 @@ std::vector<std::vector<std::string>> Table::setUnion(const std::vector<std::vec
     
     return result;
 }
-
 std::vector<std::vector<std::string>> Table::setIntersect(const std::vector<std::vector<std::string>>& otherResult) {
     std::shared_lock<std::shared_mutex> lock(mutex);
     
@@ -53,7 +48,6 @@ std::vector<std::vector<std::string>> Table::setIntersect(const std::vector<std:
     
     return result;
 }
-
 std::vector<std::vector<std::string>> Table::setExcept(const std::vector<std::vector<std::string>>& otherResult) {
     std::shared_lock<std::shared_mutex> lock(mutex);
     
@@ -68,7 +62,6 @@ std::vector<std::vector<std::string>> Table::setExcept(const std::vector<std::ve
     return result;
 }
 // Add these near the top of table.cpp with other helper functions
-
 // This function extracts an aggregation function and column from an expression like "AVG(salary)"
 std::pair<std::string, std::string> extractAggregateFunction(const std::string& expr) {
     std::regex aggPattern(R"((\w+)\s*\(\s*([^)]+)\s*\))");
@@ -80,7 +73,6 @@ std::pair<std::string, std::string> extractAggregateFunction(const std::string& 
     
     return {"", ""};
 }
-
 // Add this helper function to handle aggregate calculations
 std::string Table::applyAggregateFunction(const std::string& function, const std::vector<std::string>& values) {
     if (values.empty()) {
@@ -125,22 +117,17 @@ std::string Table::applyAggregateFunction(const std::string& function, const std
 }
 // Transaction Support
 // -------------------
-
 void Table::lockShared() {
     mutex.lock_shared();
 }
-
 void Table::lockExclusive() {
     mutex.lock();
 }
-
 void Table::unlock() {
     mutex.unlock();
 }
-
 // Utility Functions
 // -----------------
-
 void Table::sortRows(const std::string& columnName, bool ascending) {
     std::unique_lock<std::shared_mutex> lock(mutex);
     
@@ -161,26 +148,21 @@ void Table::sortRows(const std::string& columnName, bool ascending) {
             }
         });
 }
-
 int Table::getRowCount() const {
     std::shared_lock<std::shared_mutex> lock(mutex);
     return rows.size();
 }
-
 bool Table::hasColumn(const std::string& columnName) const {
-    std::cout << "Debug: Checking if column '" << columnName << "' exists" << std::endl;
+    
     return std::find(columns.begin(), columns.end(), columnName) != columns.end();
 }
-
 int Table::getColumnIndex(const std::string& columnName) const {
     std::shared_lock<std::shared_mutex> lock(mutex);
     auto it = std::find(columns.begin(), columns.end(), columnName);
     return (it != columns.end()) ? std::distance(columns.begin(), it) : -1;
 }
-
 // Join Operations
 // ---------------
-
 // In Table.cpp, improve the innerJoin method
 std::vector<std::vector<std::string>> Table::innerJoin(
     Table& rightTable,
@@ -268,7 +250,6 @@ std::vector<std::vector<std::string>> Table::innerJoin(
     
     return result;
 }
-
 std::vector<std::vector<std::string>> Table::leftOuterJoin(
     Table& rightTable,
     const std::string& condition,
@@ -393,9 +374,6 @@ std::vector<std::vector<std::string>> Table::leftOuterJoin(
     
     return result;
 }
-
-
-
 std::vector<std::vector<std::string>> Table::rightOuterJoin(
     Table& rightTable,
     const std::string& condition,
@@ -416,7 +394,6 @@ std::vector<std::vector<std::string>> Table::rightOuterJoin(
     // Use the reversed condition when calling leftOuterJoin
     return rightTable.leftOuterJoin(*this, reversedCondition, selectColumns);
 }
-
 std::vector<std::vector<std::string>> Table::naturalJoin(
     Table& rightTable,
     const std::vector<std::string>& selectColumns
@@ -682,7 +659,6 @@ std::vector<std::vector<std::string>> Table::fullOuterJoin(
 }
 // Data Manipulation
 // -----------------
-
 void Table::deleteRows(const std::string& condition) {
     std::unique_lock<std::shared_mutex> lock(mutex);
     
@@ -702,7 +678,6 @@ void Table::deleteRows(const std::string& condition) {
         rows.end()
     );
 }
-
 void Table::updateRows(const std::vector<std::pair<std::string, std::string>>& updates, const std::string& condition) {
     std::unique_lock<std::shared_mutex> lock(mutex);
     
@@ -812,22 +787,19 @@ void Table::updateRows(const std::vector<std::pair<std::string, std::string>>& u
         }
     }
 }
-
 void Table::clearRows() {
     std::unique_lock<std::shared_mutex> lock(mutex);
     rows.clear();
 }
-
 // Schema Modification
 // -------------------
-
 void Table::addColumn(const std::string& columnName, const std::string& type, bool isNotNull) {
-    std::cout << "Debug: Adding column " << columnName << " of type " << type << std::endl;
-    std::cout << std::flush;
+    
+    
     
     std::unique_lock<std::shared_mutex> lock(mutex);
-    std::cout << "Debug: Acquired column mutex lock" << std::endl;
-    std::cout << std::flush;
+    
+    
     
     
     if (hasColumn(columnName)) {
@@ -842,7 +814,6 @@ void Table::addColumn(const std::string& columnName, const std::string& type, bo
         row.push_back("");
     }
 }
-
 bool Table::dropColumn(const std::string& columnName) {
     std::unique_lock<std::shared_mutex> lock(mutex);
     
@@ -864,7 +835,6 @@ bool Table::dropColumn(const std::string& columnName) {
     
     return true;
 }
-
 void Table::renameColumn(const std::string& oldName, const std::string& newName) {
     std::unique_lock<std::shared_mutex> lock(mutex);
     
@@ -879,10 +849,8 @@ void Table::renameColumn(const std::string& oldName, const std::string& newName)
     
     *it = newName;
 }
-
 // Constraint Management
 // ---------------------
-
 void Table::addConstraint(const Constraint& constraint) {
     std::unique_lock<std::shared_mutex> lock(mutex);
     
@@ -900,7 +868,6 @@ void Table::addConstraint(const Constraint& constraint) {
     
     constraints.push_back(constraint);
 }
-
 bool Table::dropConstraint(const std::string& constraintName) {
     std::unique_lock<std::shared_mutex> lock(mutex);
     
@@ -914,10 +881,8 @@ bool Table::dropConstraint(const std::string& constraintName) {
     constraints.erase(it);
     return true;
 }
-
 // Data Validation
 // ---------------
-
 bool Table::validateConstraints(const std::vector<std::string>& row) {
     for (size_t i = 0; i < notNullConstraints.size(); ++i) {
         if (notNullConstraints[i] && (i >= row.size() || row[i].empty())) {
@@ -952,19 +917,17 @@ bool Table::validateConstraints(const std::vector<std::string>& row) {
     
     return true;
 }
-
 // Data Insertion
 // --------------
-
 // In Table.cpp, make sure addRow calls validateConstraints before adding the row:
 // Enhanced version with more debugging
 int Table::addRow(const std::vector<std::string>& values) {
-    std::cout << "Debug: addRow - Starting with " << values.size() << " values" << std::endl;
-    std::cout << std::flush;
+    
+    
     
     std::unique_lock<std::shared_mutex> lock(mutex);
-    std::cout << "Debug: addRow - Acquired mutex lock" << std::endl;
-    std::cout << std::flush;
+    
+    
     
     if (values.size() != columns.size()) {
         throw DatabaseException("Incorrect number of values for row");
@@ -973,8 +936,8 @@ int Table::addRow(const std::vector<std::string>& values) {
     std::vector<std::string> rowValues = values;
     
     // Apply data type enforcement
-    std::cout << "Debug: addRow - Enforcing data types" << std::endl;
-    std::cout << std::flush;
+    
+    
     for (size_t i = 0; i < rowValues.size(); ++i) {
         enforceDataType(i, rowValues[i]);
     }
@@ -982,8 +945,8 @@ int Table::addRow(const std::vector<std::string>& values) {
     // Validate all constraints
     try {
         // Check NOT NULL constraints
-        std::cout << "Debug: addRow - Validating NOT NULL constraints" << std::endl;
-        std::cout << std::flush;
+        
+        
         for (size_t i = 0; i < notNullConstraints.size(); ++i) {
             if (notNullConstraints[i] && (i >= rowValues.size() || rowValues[i].empty())) {
                 throw ConstraintViolationException("NOT NULL constraint violated for column '" + columns[i] + "'");
@@ -995,16 +958,16 @@ int Table::addRow(const std::vector<std::string>& values) {
             switch (constraint.type) {
                 case Constraint::Type::PRIMARY_KEY:
                 case Constraint::Type::UNIQUE:
-                    std::cout << "Debug: addRow - Validating UNIQUE/PK constraint: " << constraint.name << std::endl;
-                    std::cout << std::flush;
+                    
+                    
                     if (!validateUniqueConstraint(constraint, rowValues)) {
                         throw ConstraintViolationException("UNIQUE constraint '" + constraint.name + "' violated");
                     }
                     break;
                     
                 case Constraint::Type::FOREIGN_KEY:
-                    std::cout << "Debug: addRow - Validating FK constraint: " << constraint.name << std::endl;
-                    std::cout << std::flush;
+                    
+                    
                     // Use the simple version of FK validation
                     if (!validateForeignKeyConstraintSimple(constraint, rowValues)) {
                         throw ReferentialIntegrityException("FOREIGN KEY constraint '" + 
@@ -1013,8 +976,8 @@ int Table::addRow(const std::vector<std::string>& values) {
                     break;
                     
                 case Constraint::Type::CHECK:
-                    std::cout << "Debug: addRow - Validating CHECK constraint: " << constraint.name << std::endl;
-                    std::cout << std::flush;
+                    
+                    
                     if (!validateCheckConstraint(constraint, rowValues)) {
                         throw ConstraintViolationException("CHECK constraint '" + constraint.name + "' violated");
                     }
@@ -1026,29 +989,17 @@ int Table::addRow(const std::vector<std::string>& values) {
             }
         }
     } catch (const std::exception& e) {
-        std::cout << "Debug: addRow - Constraint validation failed: " << e.what() << std::endl;
-        std::cout << std::flush;
+        
+        
         throw DatabaseException(e.what());
     }
     
     // All constraints passed, add the row
-    std::cout << "Debug: addRow - All constraints passed, adding row" << std::endl;
-    std::cout << std::flush;
+    
+    
     rows.push_back(rowValues);
     return nextRowId++;
 }
-
-
-
-
-
-
-
-
-
-
-
-
 int Table::addRowWithId(int rowId, const std::vector<std::string>& values) {
     if (values.size() != columns.size()) {
         throw DatabaseException("Incorrect number of values for row");
@@ -1065,16 +1016,9 @@ int Table::addRowWithId(int rowId, const std::vector<std::string>& values) {
     
     return rowId;
 }
-
 // Data Querying
 // -------------
-
 // In Table.cpp, improve the selectRows method for GROUP BY
-
-
-
-
-
 std::vector<std::vector<std::string>> Table::selectRows(
     const std::vector<std::string>& selectColumns,
     const std::string& condition,
@@ -1211,7 +1155,6 @@ std::vector<std::vector<std::string>> Table::selectRows(
             result.push_back(resultRow);
         }
     }
-
     
     // Handle ORDER BY
     if (!orderByColumns.empty()) {
@@ -1254,10 +1197,8 @@ std::vector<std::vector<std::string>> Table::selectRows(
     
     return result;
 }
-
 // Debugging
 // ---------
-
 void Table::printTable() {
     std::shared_lock<std::shared_mutex> lock(mutex);
     
@@ -1284,7 +1225,6 @@ void Table::printTable() {
     }
 }
 // Add these implementations to Table.cpp
-
 void Table::enforceDataType(int columnIndex, std::string& value) {
     if (columnIndex >= columnTypes.size()) {
         throw DataTypeException("Column index out of range");
@@ -1394,7 +1334,6 @@ void Table::enforceDataType(int columnIndex, std::string& value) {
             break;
     }
 }
-
 // In Table.cpp, update the validateUniqueConstraint method:
 // Modified version of validateUniqueConstraint without additional mutex lock
 bool Table::validateUniqueConstraint(const Constraint& constraint, const std::vector<std::string>& newRow) {
@@ -1440,24 +1379,20 @@ bool Table::validateUniqueConstraint(const Constraint& constraint, const std::ve
     
     return true; // Constraint satisfied
 }
-
 // In Table.cpp, update the validateForeignKeyConstraint method:
 bool Table::validateForeignKeyConstraintSimple(const Constraint& constraint, const std::vector<std::string>& row) {
-    std::cout << "Starting FK validation for " << constraint.name << std::endl;
-    std::cout << std::flush;
+    
+    
         
     // Use the ForeignKeyValidator instead of direct Database access
     return ForeignKeyValidator::getInstance().validateForeignKey(constraint, row, columns);
 }
-
-
 bool Table::validateCheckConstraint(const Constraint& constraint, const std::vector<std::string>& row) {
     // Parse and evaluate the check expression against the row
     ConditionParser parser(constraint.checkExpression);
     auto expr = parser.parse();
     return expr->evaluate(row, columns);
 }
-
 bool Table::validateConstraintsForUpdate(const std::vector<std::string>& oldRow, const std::vector<std::string>& newRow) {
     // For updates, we need to:
     // 1. Check NOT NULL constraints
