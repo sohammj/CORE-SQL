@@ -1,4 +1,4 @@
-# CoreSQL: A Feature-Rich SQL Database Engine in C++
+# CORE-SQL: In-Memory SQL Database System
 
 A lightweight, fast, and feature-rich relational database management system implemented entirely in C++. This project provides a comprehensive SQL interface with support for ACID transactions, complex queries, referential integrity, and other essential database features.
 
